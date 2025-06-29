@@ -1,0 +1,10 @@
+# Core packages
+PyQt5==5.15.10
+PyQtWebEngine==5.15.6
+pyserial==3.5
+
+# Data processing and visualization
+numpy
+matplotlib
+Pillow
+requests
