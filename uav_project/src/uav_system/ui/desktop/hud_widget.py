@@ -1020,3 +1020,19 @@ class HUDWidget(QWidget):
     def set_connection_status(self, connected: bool):
         """Set connection status (compatibility method)"""
         self.setConnectionState(connected)
+
+    def showEvent(self, event):
+        """Override showEvent to ensure HUD fills the entire parent area."""
+        super().showEvent(event)
+        if self.parent():
+            # Resize to match parent exactly
+            parent_size = self.parent().size()
+            self.setGeometry(0, 0, parent_size.width(), parent_size.height())
+            self.resize(parent_size)
+            self.update()
+
+    def resizeEvent(self, event):
+        """Override resizeEvent to handle size changes properly."""
+        super().resizeEvent(event)
+        # Force update when size changes
+        self.update()

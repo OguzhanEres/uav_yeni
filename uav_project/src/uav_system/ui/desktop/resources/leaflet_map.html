@@ -1,0 +1,421 @@
+
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Hüma UAV - Leaflet Map</title>
+            <meta charset="utf-8" />
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            
+            <!-- Leaflet CSS -->
+            <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+                integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+                crossorigin=""/>
+            
+            <!-- Leaflet JavaScript -->
+            <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+                integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+                crossorigin=""></script>
+            
+            <style>
+                body {
+                    margin: 0;
+                    padding: 0;
+                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                    overflow: hidden;
+                }
+                #map {
+                    height: 100vh;
+                    width: 100vw;
+                }
+                .custom-div-icon {
+                    background: none;
+                    border: none;
+                }
+                .uav-marker {
+                    width: 30px;
+                    height: 30px;
+                    background: #e74c3c;
+                    border: 3px solid white;
+                    border-radius: 50%;
+                    box-shadow: 0 0 15px rgba(231, 76, 60, 0.6);
+                    animation: pulse 2s infinite;
+                }
+                @keyframes pulse {
+                    0% { box-shadow: 0 0 0 0 rgba(231, 76, 60, 0.7); }
+                    70% { box-shadow: 0 0 0 20px rgba(231, 76, 60, 0); }
+                    100% { box-shadow: 0 0 0 0 rgba(231, 76, 60, 0); }
+                }
+                .waypoint-marker {
+                    width: 20px;
+                    height: 20px;
+                    background: #3498db;
+                    border: 2px solid white;
+                    border-radius: 50%;
+                    box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+                }
+                .heading-arrow {
+                    background: none;
+                    border: none;
+                    pointer-events: none;
+                }
+                .info-panel {
+                    position: absolute;
+                    top: 10px;
+                    right: 10px;
+                    background: rgba(44, 62, 80, 0.9);
+                    color: white;
+                    padding: 10px;
+                    border-radius: 8px;
+                    z-index: 1000;
+                    font-size: 12px;
+                    min-width: 200px;
+                }
+                .loading-overlay {
+                    position: absolute;
+                    top: 50%;
+                    left: 50%;
+                    transform: translate(-50%, -50%);
+                    background: rgba(52, 152, 219, 0.9);
+                    color: white;
+                    padding: 20px 30px;
+                    border-radius: 10px;
+                    z-index: 2000;
+                    font-size: 16px;
+                    font-weight: bold;
+                    display: none;
+                }
+            </style>
+        </head>
+        <body onload="initMap()">
+            <div id="map"></div>
+            <div class="info-panel" id="infoPanel">
+                <div><strong>🗺️ Leaflet Online Map</strong></div>
+                <div>Zoom: <span id="zoomLevel">13</span></div>
+                <div>Center: <span id="mapCenter">39.9334, 32.8597</span></div>
+                <div>UAV: <span id="uavStatus">Bağlantı bekleniyor</span></div>
+            </div>
+            <div class="loading-overlay" id="loadingOverlay">
+                🌐 Harita yükleniyor...
+            </div>
+            
+            <script>
+                var map;
+                var uavMarker;
+                var flightPath = [];
+                var flightPolyline;
+                var headingLine;
+                var headingArrow;
+                var waypoints = {};
+                var streetLayer, satelliteLayer;
+                var currentLayer = 'street';
+                
+                function initMap() {
+                    try {
+                        console.log('Initializing Leaflet map...');
+                        
+                        // Show loading
+                        document.getElementById('loadingOverlay').style.display = 'block';
+                        
+                        // Initialize map
+                        map = L.map('map', {
+                            center: [39.9334, 32.8597],
+                            zoom: 13,
+                            zoomControl: true,
+                            scrollWheelZoom: true,
+                            doubleClickZoom: true,
+                            dragging: true
+                        });
+                        
+                        // Define tile layers
+                        streetLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                            attribution: '© OpenStreetMap contributors',
+                            maxZoom: 19
+                        });
+                        
+                        satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                            attribution: '© Esri, Maxar, Earthstar Geographics',
+                            maxZoom: 19
+                        });
+                        
+                        // Add default layer
+                        streetLayer.addTo(map);
+                        
+                        // Initialize flight path (disabled by default)
+                        flightPolyline = L.polyline([], {
+                            color: '#e74c3c',
+                            weight: 3,
+                            opacity: 0.8
+                        });
+                        // Do not add to map by default - user can enable it with the flight path button
+                        
+                        // Map event listeners
+                        map.on('click', function(e) {
+                            var lat = e.latlng.lat.toFixed(6);
+                            var lng = e.latlng.lng.toFixed(6);
+                            console.log('Map clicked at:', lat, lng);
+                            
+                            // Update center display
+                            document.getElementById('mapCenter').textContent = lat + ', ' + lng;
+                            
+                            // Create temporary click marker
+                            var clickMarker = L.circleMarker([e.latlng.lat, e.latlng.lng], {
+                                color: '#f1c40f',
+                                fillColor: '#f39c12',
+                                fillOpacity: 0.8,
+                                radius: 8
+                            }).addTo(map);
+                            
+                            setTimeout(function() {
+                                map.removeLayer(clickMarker);
+                            }, 2000);
+                        });
+                        
+                        map.on('zoomend', function() {
+                            document.getElementById('zoomLevel').textContent = map.getZoom();
+                        });
+                        
+                        map.on('moveend', function() {
+                            var center = map.getCenter();
+                            document.getElementById('mapCenter').textContent = 
+                                center.lat.toFixed(4) + ', ' + center.lng.toFixed(4);
+                        });
+                        
+                        // Handle resize
+                        function onResize() {
+                            console.log('Map resize triggered');
+                            setTimeout(function() {
+                                map.invalidateSize();
+                            }, 100);
+                        }
+                        
+                        window.addEventListener('resize', onResize);
+                        
+                        // Hide loading after initialization
+                        setTimeout(function() {
+                            document.getElementById('loadingOverlay').style.display = 'none';
+                            console.log('Leaflet map initialized successfully');
+                        }, 1000);
+                        
+                    } catch (error) {
+                        console.error('Error initializing map:', error);
+                        document.getElementById('loadingOverlay').innerHTML = 
+                            '❌ Harita başlatma hatası<br>' + error.message;
+                    }
+                }
+                
+                // Functions callable from Qt
+                window.updateUAVPosition = function(lat, lon, heading) {
+                    try {
+                        if (!map) {
+                            console.log('Map not initialized yet, deferring UAV position update');
+                            setTimeout(function() {
+                                updateUAVPosition(lat, lon, heading);
+                            }, 1000);
+                            return;
+                        }
+                        
+                        console.log('Updating UAV position:', lat, lon, heading);
+                        
+                        // Remove existing UAV marker and heading line
+                        if (uavMarker) {
+                            map.removeLayer(uavMarker);
+                        }
+                        if (headingLine) {
+                            map.removeLayer(headingLine);
+                        }
+                        if (headingArrow) {
+                            map.removeLayer(headingArrow);
+                        }
+                        
+                        // Create UAV marker
+                        var uavIcon = L.divIcon({
+                            className: 'custom-div-icon',
+                            html: '<div class="uav-marker"></div>',
+                            iconSize: [30, 30],
+                            iconAnchor: [15, 15]
+                        });
+                        
+                        uavMarker = L.marker([lat, lon], {icon: uavIcon})
+                            .addTo(map)
+                            .bindPopup(`🚁 UAV<br>Lat: ${lat.toFixed(6)}<br>Lon: ${lon.toFixed(6)}<br>Heading: ${heading.toFixed(1)}°`);
+                        
+                        // Create heading line (burun yönelimi)
+                        var headingDistance = 0.001; // Yaklaşık 100 metre (coğrafi koordinatlarda)
+                        var headingRad = (heading * Math.PI) / 180; // Dereceyi radyana çevir
+                        
+                        // Heading yönünde nokta hesapla (kuzey = 0°, saat yönü pozitif)
+                        var headingEndLat = lat + (headingDistance * Math.cos(headingRad));
+                        var headingEndLon = lon + (headingDistance * Math.sin(headingRad));
+                        
+                        // Heading çizgisini oluştur
+                        headingLine = L.polyline([
+                            [lat, lon],
+                            [headingEndLat, headingEndLon]
+                        ], {
+                            color: '#ff6b35',  // Turuncu renk
+                            weight: 4,
+                            opacity: 0.9
+                        }).addTo(map);
+                        
+                        // Heading çizgisinin ucuna ok işareti ekle
+                        var arrowIcon = L.divIcon({
+                            className: 'heading-arrow',
+                            html: '<div style="width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-bottom: 12px solid #ff6b35; transform: rotate(' + heading + 'deg);"></div>',
+                            iconSize: [12, 12],
+                            iconAnchor: [6, 6]
+                        });
+                        
+                        headingArrow = L.marker([headingEndLat, headingEndLon], {icon: arrowIcon}).addTo(map);
+                        
+                        // Add to flight path
+                        flightPath.push([lat, lon]);
+                        if (flightPath.length > 1000) {
+                            flightPath.shift();
+                        }
+                        
+                        // Update flight path polyline
+                        if (flightPolyline) {
+                            flightPolyline.setLatLngs(flightPath);
+                        }
+                        
+                        // Update status
+                        var statusElement = document.getElementById('uavStatus');
+                        if (statusElement) {
+                            statusElement.textContent = `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+                        }
+                        
+                    } catch (error) {
+                        console.error('Error updating UAV position:', error);
+                    }
+                };
+                
+                window.centerOnUAV = function() {
+                    try {
+                        if (!map) {
+                            console.log('Map not initialized yet');
+                            return;
+                        }
+                        if (uavMarker) {
+                            map.setView(uavMarker.getLatLng(), map.getZoom());
+                            console.log('Map centered on UAV');
+                        }
+                    } catch (error) {
+                        console.error('Error centering on UAV:', error);
+                    }
+                };
+                
+                window.clearFlightPath = function() {
+                    try {
+                        flightPath = [];
+                        if (flightPolyline) {
+                            flightPolyline.setLatLngs([]);
+                        }
+                        console.log('Flight path cleared');
+                    } catch (error) {
+                        console.error('Error clearing flight path:', error);
+                    }
+                };
+                
+                window.addWaypoint = function(lat, lon, name, id) {
+                    try {
+                        if (!map) {
+                            console.log('Map not initialized yet, deferring waypoint addition');
+                            setTimeout(function() {
+                                addWaypoint(lat, lon, name, id);
+                            }, 1000);
+                            return;
+                        }
+                        
+                        var waypointIcon = L.divIcon({
+                            className: 'custom-div-icon',
+                            html: '<div class="waypoint-marker"></div>',
+                            iconSize: [20, 20],
+                            iconAnchor: [10, 10]
+                        });
+                        
+                        var marker = L.marker([lat, lon], {icon: waypointIcon})
+                            .addTo(map)
+                            .bindPopup(`📍 ${name}<br>Lat: ${lat.toFixed(6)}<br>Lon: ${lon.toFixed(6)}`);
+                        
+                        waypoints[id] = marker;
+                        console.log('Waypoint added:', id, name);
+                        
+                    } catch (error) {
+                        console.error('Error adding waypoint:', error);
+                    }
+                };
+                
+                window.removeWaypoint = function(id) {
+                    try {
+                        if (!map) {
+                            console.log('Map not initialized yet');
+                            return;
+                        }
+                        if (waypoints[id]) {
+                            map.removeLayer(waypoints[id]);
+                            delete waypoints[id];
+                            console.log('Waypoint removed:', id);
+                        }
+                    } catch (error) {
+                        console.error('Error removing waypoint:', error);
+                    }
+                };
+                
+                window.setMapCenter = function(lat, lon, zoom) {
+                    try {
+                        if (!map) {
+                            console.log('Map not initialized yet');
+                            return;
+                        }
+                        if (zoom) {
+                            map.setView([lat, lon], zoom);
+                        } else {
+                            map.setView([lat, lon]);
+                        }
+                    } catch (error) {
+                        console.error('Error setting map center:', error);
+                    }
+                };
+                
+                window.toggleSatelliteLayer = function() {
+                    if (currentLayer === 'street') {
+                        map.removeLayer(streetLayer);
+                        satelliteLayer.addTo(map);
+                        currentLayer = 'satellite';
+                        console.log('Switched to satellite layer');
+                    } else {
+                        map.removeLayer(satelliteLayer);
+                        streetLayer.addTo(map);
+                        currentLayer = 'street';
+                        console.log('Switched to street layer');
+                    }
+                };
+                
+                window.toggleFlightPath = function(show) {
+                    if (show) {
+                        flightPolyline.addTo(map);
+                    } else {
+                        map.removeLayer(flightPolyline);
+                    }
+                };
+                
+                // Force map resize
+                window.forceResize = function() {
+                    setTimeout(function() {
+                        map.invalidateSize();
+                        console.log('Map size invalidated');
+                    }, 100);
+                };
+                
+                // Add some test data after initialization
+                setTimeout(function() {
+                    if (typeof updateUAVPosition === 'function') {
+                        updateUAVPosition(39.9334, 32.8597, 45);
+                        addWaypoint(39.9344, 32.860699999999994, 'Test Waypoint', 'test_wp_1');
+                    }
+                }, 2000);
+                
+            </script>
+        </body>
+        </html>
+        
