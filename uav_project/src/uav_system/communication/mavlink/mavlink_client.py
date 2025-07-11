@@ -5,7 +5,7 @@ Improved MAVLink Client for UAV communication.
 import socket
 import threading
 import time
-from typing import Dict, Any, Optional, Callable
+from typing import Dict, Any, Optional, Callable, Tuple
 from pymavlink import mavutil
 from pymavlink.dialects.v20 import common as mavlink
 
@@ -359,3 +359,285 @@ class MAVLinkClient(BaseProtocol):
             'time_since_heartbeat': time.time() - self.last_heartbeat if self.last_heartbeat else 0,
             'running': self._running
         }
+
+    def get_location(self) -> Optional[Tuple[float, float]]:
+        """Get current location from UAV."""
+        if not self.is_connected or not self.connection:
+            self.logger.error("Cannot get location - not connected")
+            return None
+        
+        print("Waiting for current location...")
+        retries = 0
+        max_retries = 10
+        
+        while retries < max_retries:
+            try:
+                msg = self.connection.recv_match(type='GLOBAL_POSITION_INT', blocking=True, timeout=5)
+                if msg:
+                    lat = msg.lat / 1e7
+                    lon = msg.lon / 1e7
+                    print(f"Current location: lat={lat}, lon={lon}")
+                    self.logger.info(f"Location obtained: lat={lat}, lon={lon}")
+                    return lat, lon
+                else:
+                    retries += 1
+                    self.logger.warning(f"No location message received, retry {retries}/{max_retries}")
+            except Exception as e:
+                retries += 1
+                self.logger.error(f"Error getting location: {e}, retry {retries}/{max_retries}")
+                
+        self.logger.error("Failed to get location after maximum retries")
+        return None
+
+    def autonomous_takeoff(self, altitude: float) -> bool:
+        """Perform autonomous takeoff sequence."""
+        if not self.is_connected or not self.connection:
+            self.logger.error("Cannot takeoff - not connected")
+            return False
+        
+        try:
+            self.logger.info(f"Starting autonomous takeoff to {altitude}m")
+            
+            # Step 1: Set mode to GUIDED
+            if not self.set_mode('GUIDED'):
+                self.logger.error("Failed to set GUIDED mode")
+                return False
+            
+            # Step 2: Arm the vehicle
+            if not self.arm_disarm(arm=True):
+                self.logger.error("Failed to arm vehicle")
+                return False
+            
+            # Step 3: Get current location
+            location = self.get_location()
+            if not location:
+                self.logger.error("Failed to get current location")
+                return False
+            
+            lat, lon = location
+            
+            # Step 4: Clear existing mission
+            self.connection.mav.mission_clear_all_send(
+                self.connection.target_system, 
+                self.connection.target_component
+            )
+            time.sleep(1)
+            
+            # Step 5: Set mission count
+            self.connection.mav.mission_count_send(
+                self.connection.target_system, 
+                self.connection.target_component, 
+                1
+            )
+            time.sleep(0.5)
+            
+            # Step 6: Send takeoff mission item
+            self.connection.mav.mission_item_send(
+                self.connection.target_system,
+                self.connection.target_component,
+                0,  # sequence
+                mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT,
+                mavutil.mavlink.MAV_CMD_NAV_TAKEOFF,
+                0, 1,    # current=0, autocontinue=1
+                0, 0, 0, 0,  # params 1-4 unused here
+                lat, lon, altitude  # location and altitude
+            )
+            
+            print("Waiting for mission ACK...")
+            self.logger.info("Waiting for mission acknowledgment...")
+            
+            # Step 7: Wait for vehicle to be armed
+            timeout = 30  # 30 second timeout
+            start_time = time.time()
+            while time.time() - start_time < timeout:
+                try:
+                    msg = self.connection.recv_match(type='HEARTBEAT', blocking=True, timeout=2)
+                    if msg and (msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED):
+                        print("✅ Plane is armed.")
+                        self.logger.info("Vehicle armed successfully")
+                        break
+                except Exception as e:
+                    self.logger.warning(f"Error checking arm status: {e}")
+            else:
+                self.logger.error("Vehicle failed to arm within timeout")
+                return False
+            
+            # Step 8: Set mode to AUTO to execute mission
+            if not self.set_mode('AUTO'):
+                self.logger.error("Failed to set AUTO mode")
+                return False
+            
+            self.logger.info("Autonomous takeoff sequence completed successfully")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Autonomous takeoff failed: {e}")
+            return False
+
+    def send_mission_item(self, seq: int, frame: int, command: int, current: int, 
+                         autocontinue: int, param1: float, param2: float, param3: float, 
+                         param4: float, x: float, y: float, z: float) -> bool:
+        """Send a mission item to the vehicle."""
+        if not self.is_connected or not self.connection:
+            self.logger.error("Cannot send mission item - not connected")
+            return False
+        
+        try:
+            self.connection.mav.mission_item_int_send(
+                self.connection.target_system,
+                self.connection.target_component,
+                seq,
+                frame,
+                command,
+                current,
+                autocontinue,
+                param1, param2, param3, param4,
+                int(x * 1e7),  # lat
+                int(y * 1e7),  # lon
+                z             # alt
+            )
+            self.logger.debug(f"Mission item {seq} sent successfully")
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to send mission item: {e}")
+            return False
+
+    def autonomous_land(self, lon: float, lat: float, current_alt: float, cruise_alt: float) -> bool:
+        """Perform autonomous landing sequence."""
+        if not self.is_connected or not self.connection:
+            self.logger.error("Cannot land - not connected")
+            return False
+        
+        try:
+            self.logger.info(f"Starting autonomous landing sequence at lat={lat}, lon={lon}")
+            
+            # Step 1: Clear existing mission
+            self.connection.mav.mission_clear_all_send(
+                self.connection.target_system, 
+                self.connection.target_component
+            )
+            time.sleep(1)
+            
+            # Step 2: Set mission count (3 items: takeoff, waypoint, land)
+            self.connection.mav.mission_count_send(
+                self.connection.target_system, 
+                self.connection.target_component, 
+                3
+            )
+            time.sleep(0.5)
+            
+            # Step 3: Send takeoff mission item (current position)
+            success = self.send_mission_item(
+                seq=0,
+                frame=mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT,
+                command=mavutil.mavlink.MAV_CMD_NAV_TAKEOFF,
+                current=1,
+                autocontinue=1,
+                param1=0, param2=0, param3=0, param4=0,
+                x=lat,
+                y=lon,
+                z=current_alt
+            )
+            
+            if not success:
+                self.logger.error("Failed to send takeoff mission item")
+                return False
+            
+            # Wait for mission request
+            try:
+                msg = self.connection.recv_match(type='MISSION_REQUEST', blocking=True, timeout=5)
+                if not msg:
+                    self.logger.warning("No mission request received for item 1")
+            except Exception as e:
+                self.logger.warning(f"Error waiting for mission request: {e}")
+            
+            # Step 4: Send waypoint mission item
+            success = self.send_mission_item(
+                seq=1,
+                frame=mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT,
+                command=mavutil.mavlink.MAV_CMD_NAV_WAYPOINT,
+                current=0,
+                autocontinue=1,
+                param1=0, param2=0, param3=0, param4=0,
+                x=lat + 0.0005,  # Small offset for approach
+                y=lon + 0.0005,
+                z=cruise_alt
+            )
+            
+            if not success:
+                self.logger.error("Failed to send waypoint mission item")
+                return False
+            
+            # Wait for mission request
+            try:
+                msg = self.connection.recv_match(type='MISSION_REQUEST', blocking=True, timeout=5)
+                if not msg:
+                    self.logger.warning("No mission request received for item 2")
+            except Exception as e:
+                self.logger.warning(f"Error waiting for mission request: {e}")
+            
+            # Step 5: Send land mission item
+            success = self.send_mission_item(
+                seq=2,
+                frame=mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT,
+                command=mavutil.mavlink.MAV_CMD_NAV_LAND,
+                current=0,
+                autocontinue=1,
+                param1=0, param2=0, param3=0, param4=0,
+                x=lat,
+                y=lon,
+                z=0
+            )
+            
+            if not success:
+                self.logger.error("Failed to send land mission item")
+                return False
+            
+            # Wait for mission acknowledgment
+            try:
+                msg = self.connection.recv_match(type='MISSION_ACK', blocking=True, timeout=10)
+                if msg:
+                    self.logger.info("Mission acknowledged by vehicle")
+                else:
+                    self.logger.warning("No mission acknowledgment received")
+            except Exception as e:
+                self.logger.warning(f"Error waiting for mission ACK: {e}")
+            
+            # Step 6: Set mode to AUTO to execute mission
+            if not self.set_mode("AUTO"):
+                self.logger.error("Failed to set AUTO mode")
+                return False
+            
+            self.logger.info("Autonomous landing sequence initiated successfully")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Autonomous landing failed: {e}")
+            return False
+
+    def get_current_altitude(self) -> Optional[float]:
+        """Get current altitude from vehicle."""
+        if not self.is_connected or not self.connection:
+            return None
+        
+        try:
+            msg = self.connection.recv_match(type='GLOBAL_POSITION_INT', blocking=True, timeout=5)
+            if msg:
+                return msg.alt / 1000.0  # Convert from mm to meters
+        except Exception as e:
+            self.logger.error(f"Error getting altitude: {e}")
+        
+        return None
+
+    def emergency_stop(self) -> bool:
+        """Emergency stop - switch to RTL mode."""
+        if not self.is_connected or not self.connection:
+            self.logger.error("Cannot emergency stop - not connected")
+            return False
+        
+        try:
+            self.logger.warning("EMERGENCY STOP - Switching to RTL mode")
+            return self.set_mode('RTL')
+        except Exception as e:
+            self.logger.error(f"Emergency stop failed: {e}")
+            return False

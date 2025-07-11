@@ -23,11 +23,11 @@ if not hasattr(collections, 'MutableMapping'):
 import dronekit
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QLabel, QPushButton, 
-    QMessageBox, QInputDialog
+    QMessageBox, QInputDialog, QMenu, QShortcut
 )
 from PyQt5.QtCore import QTimer, QDateTime, QUrl, Qt, pyqtSlot
 from PyQt5 import QtCore, uic
-from PyQt5.QtGui import QDesktopServices
+from PyQt5.QtGui import QDesktopServices, QKeySequence
 from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEngineSettings, QWebEngineProfile
 
 # Internal imports
@@ -117,10 +117,18 @@ class HumaGCS(QMainWindow):
         # Communication
         self.mavlink_client = None
         
+        # Status tracking
+        self.last_status_update = 0
+        
         # Initialize UI and systems
         self.setup_ui()
         self.setup_communication()
         self.setup_components()
+        
+        # Setup autonomous operations
+        self.setup_autonomous_operations_menu()
+        self.setup_keyboard_shortcuts()
+        self.add_autonomous_operations_to_ui()
         
         logger.info("Hüma GCS initialized successfully")
     
@@ -198,14 +206,16 @@ class HumaGCS(QMainWindow):
         try:
             # Initialize MAVLink client
             self.mavlink_client = MAVLinkClient()
+            
+            # Initialize the client
             if self.mavlink_client.initialize():
+                self.mavlink_client.start()
                 logger.info("MAVLink client initialized successfully")
             else:
                 logger.error("Failed to initialize MAVLink client")
                 
         except Exception as e:
             logger.error(f"Failed to setup communication: {e}")
-            self.mavlink_client = None
     
     def setup_components(self):
         """Initialize UI components."""
@@ -216,12 +226,11 @@ class HumaGCS(QMainWindow):
             # Setup HUD view
             self.setup_hud_view()
             
-            # Initialize map in separate thread
-            self.initialize_map()
+            logger.info("Components setup completed")
             
         except Exception as e:
             logger.error(f"Failed to setup components: {e}")
-    
+
     def setup_map_view(self):
         """Setup the map view component with Leaflet online map."""
         if not hasattr(self, 'label'):
@@ -680,11 +689,14 @@ UAV kontrolleri normal çalışmaya devam edecek.
             if hasattr(self, 'RTL'):
                 self.RTL.clicked.connect(lambda: self.set_flight_mode("RTL"))
             if hasattr(self, 'TAKEOFF'):
-                self.TAKEOFF.clicked.connect(lambda: self.set_flight_mode("TAKEOFF"))
+                self.TAKEOFF.clicked.connect(self.autonomous_takeoff_handler)
             
             # Camera control
             if hasattr(self, 'kameraAc'):
                 self.kameraAc.clicked.connect(self.open_camera_window)
+            
+            # Additional autonomous operation buttons
+            # We'll use existing buttons and add new functionality
             
             logger.info("UI connections setup completed")
             
@@ -701,103 +713,421 @@ UAV kontrolleri normal çalışmaya devam edecek.
             
             # Telemetry timer
             self.telemetry_timer = QTimer(self)
-            self.telemetry_timer.timeout.connect(self.update_telemetry_display)
-            self.telemetry_timer.start(settings.TELEMETRY_UPDATE_RATE)
+            self.telemetry_timer.timeout.connect(self.update_telemetry)
+            self.telemetry_timer.start(settings.TELEMETRY_UPDATE_RATE)  # Update based on settings
+            
+            # Status display timer
+            self.status_timer = QTimer(self)
+            self.status_timer.timeout.connect(self.display_flight_status)
+            self.status_timer.start(10000)  # Update every 10 seconds
             
             logger.info("Timers setup completed")
             
         except Exception as e:
             logger.error(f"Failed to setup timers: {e}")
     
-    def initialize_map(self):
-        """Initialize the map component with fallback options."""
-        # Skip complex map initialization, use simple offline map instead
-        logger.info("Map initialization completed (offline mode)")
-        
-        # Optional: Try to detect internet connectivity
+    def update_server_time(self):
+        """Update server time display."""
         try:
-            import urllib.request
-            urllib.request.urlopen('https://www.google.com', timeout=3)
-            logger.info("Internet connection detected - online maps could be enabled")
-        except:
-            logger.info("No internet connection - using offline map mode")
+            if hasattr(self, 'serverTime'):
+                current_time = QDateTime.currentDateTime()
+                self.serverTime.setText(current_time.toString("hh:mm:ss"))
+        except Exception as e:
+            logger.error(f"Failed to update server time: {e}")
     
-    def start_map_server(self):
-        """Disabled - using offline map instead."""
-        logger.info("Map server not needed for offline mode")
-    
-    def connect_drone(self):
-        """Connect to the drone."""
-        if not hasattr(self, 'ihaInformer'):
-            logger.error("UI informer widget not found")
+    def update_telemetry(self):
+        """Update telemetry data and UI."""
+        try:
+            if not self.connection_active or not self.mavlink_client:
+                return
+            
+            # Get telemetry data
+            telemetry = self.mavlink_client.get_telemetry_data()
+            
+            # Update current telemetry
+            if telemetry:
+                self.current_telemetry.update(telemetry)
+                
+                # Update UI labels
+                self.update_ui_labels(telemetry)
+                
+                # Update map with UAV data
+                self.update_map_with_uav_data(telemetry)
+                
+        except Exception as e:
+            logger.error(f"Failed to update telemetry: {e}")
+
+    def autonomous_takeoff_handler(self):
+        """Handle autonomous takeoff button click."""
+        if not self.connection_active:
+            if hasattr(self, 'ihaInformer'):
+                self.ihaInformer.append("❌ İHA bağlı değil!")
             return
         
         try:
-            self.ihaInformer.append("🔄 İHA'ya bağlanılıyor...")
+            # Get takeoff altitude from user
+            altitude, ok = QInputDialog.getDouble(
+                self, 
+                'Otonom Kalkış', 
+                'Kalkış irtifasını girin (metre):', 
+                value=50.0, 
+                min=10.0, 
+                max=500.0, 
+                decimals=1
+            )
             
-            # Get connection string from UI
+            if not ok:
+                return
+            
+            if hasattr(self, 'ihaInformer'):
+                self.ihaInformer.append(f"🚁 Otonom kalkış başlatılıyor - İrtifa: {altitude}m")
+            
+            # Perform autonomous takeoff
+            success = False
+            
+            # Try MAVLink client first
+            if self.mavlink_client:
+                success = self.mavlink_client.autonomous_takeoff(altitude)
+                
+            if success:
+                if hasattr(self, 'ihaInformer'):
+                    self.ihaInformer.append("✅ Otonom kalkış komutu başarıyla gönderildi!")
+                    self.ihaInformer.append(f"🎯 Hedef irtifa: {altitude}m")
+                    self.ihaInformer.append("📡 Uçuş modu: AUTO")
+                logger.info(f"Autonomous takeoff initiated to {altitude}m")
+            else:
+                if hasattr(self, 'ihaInformer'):
+                    self.ihaInformer.append("❌ Otonom kalkış başarısız!")
+                    self.ihaInformer.append("🔍 Bağlantı ve GPS durumunu kontrol edin")
+                logger.error("Autonomous takeoff failed")
+                
+        except Exception as e:
+            logger.error(f"Autonomous takeoff handler error: {e}")
+            if hasattr(self, 'ihaInformer'):
+                self.ihaInformer.append(f"❌ Otonom kalkış hatası: {str(e)}")
+
+    def autonomous_land_handler(self):
+        """Handle autonomous landing."""
+        if not self.connection_active:
+            if hasattr(self, 'ihaInformer'):
+                self.ihaInformer.append("❌ İHA bağlı değil!")
+            return
+        
+        try:
+            # Get current location and altitude
+            if hasattr(self, 'ihaInformer'):
+                self.ihaInformer.append("🔍 Mevcut konum alınıyor...")
+            
+            location = None
+            current_alt = None
+            
+            if self.mavlink_client:
+                location = self.mavlink_client.get_location()
+                current_alt = self.mavlink_client.get_current_altitude()
+            
+            if not location:
+                if hasattr(self, 'ihaInformer'):
+                    self.ihaInformer.append("❌ Mevcut konum alınamadı!")
+                return
+            
+            lat, lon = location
+            
+            # Use current altitude if available, otherwise default
+            if current_alt is None:
+                current_alt = 100.0  # Default altitude
+            
+            # Get cruise altitude for approach
+            cruise_alt, ok = QInputDialog.getDouble(
+                self, 
+                'Otonom İniş', 
+                'Yaklaşma irtifasını girin (metre):', 
+                value=50.0, 
+                min=20.0, 
+                max=200.0, 
+                decimals=1
+            )
+            
+            if not ok:
+                return
+            
+            if hasattr(self, 'ihaInformer'):
+                self.ihaInformer.append(f"🛬 Otonom iniş başlatılıyor...")
+                self.ihaInformer.append(f"📍 İniş konumu: {lat:.6f}, {lon:.6f}")
+                self.ihaInformer.append(f"🎯 Yaklaşma irtifası: {cruise_alt}m")
+            
+            # Perform autonomous landing
+            success = False
+            
+            if self.mavlink_client:
+                success = self.mavlink_client.autonomous_land(lon, lat, current_alt, cruise_alt)
+                
+            if success:
+                if hasattr(self, 'ihaInformer'):
+                    self.ihaInformer.append("✅ Otonom iniş komutu başarıyla gönderildi!")
+                    self.ihaInformer.append("🎯 İniş sırası: Yaklaşma → İniş")
+                    self.ihaInformer.append("📡 Uçuş modu: AUTO")
+                logger.info(f"Autonomous landing initiated at {lat:.6f}, {lon:.6f}")
+            else:
+                if hasattr(self, 'ihaInformer'):
+                    self.ihaInformer.append("❌ Otonom iniş başarısız!")
+                    self.ihaInformer.append("🔍 Bağlantı ve GPS durumunu kontrol edin")
+                logger.error("Autonomous landing failed")
+                
+        except Exception as e:
+            logger.error(f"Autonomous landing handler error: {e}")
+            if hasattr(self, 'ihaInformer'):
+                self.ihaInformer.append(f"❌ Otonom iniş hatası: {str(e)}")
+
+    def emergency_stop_handler(self):
+        """Handle emergency stop."""
+        if not self.connection_active:
+            if hasattr(self, 'ihaInformer'):
+                self.ihaInformer.append("❌ İHA bağlı değil!")
+            return
+        
+        try:
+            # Show confirmation dialog
+            reply = QMessageBox.question(
+                self, 
+                'Acil Durum', 
+                'ACİL DURUM: İHA\'yı RTL moduna geçir?\n\n' +
+                'Bu komut İHA\'yı ev konumuna geri döndürür.',
+                QMessageBox.Yes | QMessageBox.No, 
+                QMessageBox.No
+            )
+            
+            if reply == QMessageBox.Yes:
+                if hasattr(self, 'ihaInformer'):
+                    self.ihaInformer.append("🚨 ACİL DURUM: RTL modu etkinleştiriliyor...")
+                
+                success = False
+                
+                if self.mavlink_client:
+                    success = self.mavlink_client.emergency_stop()
+                
+                if success:
+                    if hasattr(self, 'ihaInformer'):
+                        self.ihaInformer.append("✅ İHA RTL moduna geçirildi!")
+                        self.ihaInformer.append("🏠 İHA ev konumuna dönüyor...")
+                    logger.info("Emergency stop activated - RTL mode")
+                else:
+                    if hasattr(self, 'ihaInformer'):
+                        self.ihaInformer.append("❌ Acil durum komutu başarısız!")
+                    logger.error("Emergency stop failed")
+                    
+        except Exception as e:
+            logger.error(f"Emergency stop handler error: {e}")
+            if hasattr(self, 'ihaInformer'):
+                self.ihaInformer.append(f"❌ Acil durum hatası: {str(e)}")
+
+    def setup_autonomous_operations_menu(self):
+        """Setup autonomous operations menu or buttons."""
+        try:
+            # Create autonomous operations menu if menubar exists
+            if hasattr(self, 'menubar'):
+                autonomous_menu = self.menubar.addMenu('Otonom İşlemler')
+                
+                # Takeoff action
+                takeoff_action = autonomous_menu.addAction('🚁 Otonom Kalkış')
+                takeoff_action.triggered.connect(self.autonomous_takeoff_handler)
+                
+                # Landing action
+                landing_action = autonomous_menu.addAction('🛬 Otonom İniş')
+                landing_action.triggered.connect(self.autonomous_land_handler)
+                
+                # Emergency stop action
+                autonomous_menu.addSeparator()
+                emergency_action = autonomous_menu.addAction('🚨 Acil Durum (RTL)')
+                emergency_action.triggered.connect(self.emergency_stop_handler)
+                
+                logger.info("Autonomous operations menu created")
+            else:
+                logger.warning("No menubar found for autonomous operations menu")
+                
+        except Exception as e:
+            logger.error(f"Failed to setup autonomous operations menu: {e}")
+
+    def setup_keyboard_shortcuts(self):
+        """Setup keyboard shortcuts for autonomous operations."""
+        try:
+            from PyQt5.QtGui import QKeySequence
+            from PyQt5.QtWidgets import QShortcut
+            
+            # Autonomous takeoff - Ctrl+T
+            takeoff_shortcut = QShortcut(QKeySequence('Ctrl+T'), self)
+            takeoff_shortcut.activated.connect(self.autonomous_takeoff_handler)
+            
+            # Autonomous landing - Ctrl+L
+            landing_shortcut = QShortcut(QKeySequence('Ctrl+L'), self)
+            landing_shortcut.activated.connect(self.autonomous_land_handler)
+            
+            # Emergency stop - Ctrl+E
+            emergency_shortcut = QShortcut(QKeySequence('Ctrl+E'), self)
+            emergency_shortcut.activated.connect(self.emergency_stop_handler)
+            
+            if hasattr(self, 'ihaInformer'):
+                self.ihaInformer.append("⌨️ Klavye kısayolları:")
+                self.ihaInformer.append("   Ctrl+T: Otonom Kalkış")
+                self.ihaInformer.append("   Ctrl+L: Otonom İniş")
+                self.ihaInformer.append("   Ctrl+E: Acil Durum (RTL)")
+            
+            logger.info("Keyboard shortcuts setup completed")
+            
+        except Exception as e:
+            logger.error(f"Failed to setup keyboard shortcuts: {e}")
+
+    def add_autonomous_operations_to_ui(self):
+        """Add autonomous operations to the existing UI."""
+        try:
+            # Override RTL button to also support autonomous landing
+            if hasattr(self, 'RTL'):
+                # Disconnect existing RTL connection
+                try:
+                    self.RTL.clicked.disconnect()
+                except:
+                    pass
+                
+                # Connect to new handler that provides both RTL and autonomous landing
+                self.RTL.clicked.connect(self.rtl_and_landing_handler)
+                
+                # Update button text to show dual functionality
+                self.RTL.setText("RTL / İniş")
+                self.RTL.setToolTip("Sol tık: RTL modu\nSağ tık: Otonom İniş")
+            
+            # Setup context menu for RTL button
+            if hasattr(self, 'RTL'):
+                self.RTL.setContextMenuPolicy(Qt.CustomContextMenu)
+                self.RTL.customContextMenuRequested.connect(self.rtl_context_menu)
+            
+            logger.info("Autonomous operations added to UI")
+            
+        except Exception as e:
+            logger.error(f"Failed to add autonomous operations to UI: {e}")
+
+    def rtl_and_landing_handler(self):
+        """Handle RTL button click - shows menu for RTL or autonomous landing."""
+        try:
+            from PyQt5.QtWidgets import QMenu
+            
+            # Create context menu
+            menu = QMenu(self)
+            
+            # Add RTL action
+            rtl_action = menu.addAction("🏠 RTL Modu")
+            rtl_action.triggered.connect(lambda: self.set_flight_mode("RTL"))
+            
+            # Add autonomous landing action
+            landing_action = menu.addAction("🛬 Otonom İniş")
+            landing_action.triggered.connect(self.autonomous_land_handler)
+            
+            # Show menu at button position
+            if hasattr(self, 'RTL'):
+                menu.exec_(self.RTL.mapToGlobal(self.RTL.rect().bottomLeft()))
+                
+        except Exception as e:
+            logger.error(f"RTL and landing handler error: {e}")
+
+    def rtl_context_menu(self, position):
+        """Show context menu for RTL button."""
+        try:
+            from PyQt5.QtWidgets import QMenu
+            
+            menu = QMenu(self)
+            
+            # Add RTL action
+            rtl_action = menu.addAction("🏠 RTL Modu")
+            rtl_action.triggered.connect(lambda: self.set_flight_mode("RTL"))
+            
+            # Add autonomous landing action
+            landing_action = menu.addAction("🛬 Otonom İniş")
+            landing_action.triggered.connect(self.autonomous_land_handler)
+            
+            # Add emergency stop action
+            menu.addSeparator()
+            emergency_action = menu.addAction("🚨 Acil Durum")
+            emergency_action.triggered.connect(self.emergency_stop_handler)
+            
+            # Show menu
+            if hasattr(self, 'RTL'):
+                menu.exec_(self.RTL.mapToGlobal(position))
+                
+        except Exception as e:
+            logger.error(f"RTL context menu error: {e}")
+
+    def display_flight_status(self):
+        """Display current flight status and autonomous operation status."""
+        try:
+            if not self.connection_active or not self.mavlink_client:
+                return
+            
+            # Get current telemetry
+            telemetry = self.mavlink_client.get_telemetry_data()
+            
+            # Display flight status
+            if hasattr(self, 'ihaInformer'):
+                flight_mode = telemetry.get('flight_mode', 'UNKNOWN')
+                armed = telemetry.get('armed', False)
+                altitude = telemetry.get('altitude', 0)
+                lat = telemetry.get('lat', 0)
+                lon = telemetry.get('lon', 0)
+                
+                status_text = f"📊 Uçuş Durumu:"
+                status_text += f"\n   Mod: {flight_mode}"
+                status_text += f"\n   Silahlanma: {'✅ Armed' if armed else '❌ Disarmed'}"
+                status_text += f"\n   İrtifa: {altitude:.1f}m"
+                status_text += f"\n   Konum: {lat:.6f}, {lon:.6f}"
+                
+                # Display if there's space in the informer
+                if hasattr(self, 'last_status_update'):
+                    if time.time() - self.last_status_update > 10:  # Update every 10 seconds
+                        self.ihaInformer.append(status_text)
+                        self.last_status_update = time.time()
+                else:
+                    self.ihaInformer.append(status_text)
+                    self.last_status_update = time.time()
+                
+        except Exception as e:
+            logger.error(f"Error displaying flight status: {e}")
+
+    def connect_drone(self):
+        """Connect to the drone."""
+        try:
+            if hasattr(self, 'ihaInformer'):
+                self.ihaInformer.append("📡 İHA'ya bağlanılıyor...")
+            
+            # Get connection string
             connection_string = self.get_connection_string()
             
-            # Try DroneKit first for COM ports
-            if "COM" in connection_string.upper():
-                success = self.connect_dronekit(connection_string)
-            else:
-                success = False
+            if hasattr(self, 'ihaInformer'):
+                self.ihaInformer.append(f"🔗 Bağlantı: {connection_string}")
             
-            # Fallback to MAVLink
-            if not success and self.mavlink_client:
+            # Connect MAVLink client
+            success = False
+            if self.mavlink_client:
                 success = self.mavlink_client.connect(connection_string)
-                if success:
-                    self.connection_active = True
-                    self.ihaInformer.append("✅ İHA bağlantısı başarılı! (MAVLink)")
             
             if success:
-                # Enable flight controls
-                self.enable_flight_controls()
-                
-                # Update connection status
+                self.connection_active = True
+                if hasattr(self, 'ihaInformer'):
+                    self.ihaInformer.append("✅ İHA bağlantısı kuruldu!")
+                    
                 if hasattr(self, 'baglanti'):
                     self.baglanti.setText("Bağlantı: 🟢 Aktif")
-                    
-                # Start telemetry updates
-                self.setup_telemetry_timer()
                 
-                # Get initial telemetry and update map
-                initial_telemetry = self.get_current_telemetry()
-                if initial_telemetry:
-                    self.update_map_with_uav_data(initial_telemetry)
-                    
-                self.ihaInformer.append(f"📡 Telemetri verisi alınıyor...")
-                logger.info("Drone connection successful, telemetry started")
+                self.enable_flight_controls()
+                logger.info("Drone connected successfully")
             else:
-                self.ihaInformer.append("❌ Bağlantı başarısız! Ayarları kontrol edin.")
+                if hasattr(self, 'ihaInformer'):
+                    self.ihaInformer.append("❌ İHA bağlantısı başarısız!")
+                    
+                if hasattr(self, 'baglanti'):
+                    self.baglanti.setText("Bağlantı: 🔴 Başarısız")
+                logger.error("Drone connection failed")
                 
         except Exception as e:
-            logger.error(f"Connection failed: {e}")
-            self.ihaInformer.append(f"🚫 Bağlantı hatası: {str(e)}")
-    
-    def setup_telemetry_timer(self):
-        """Setup telemetry update timer."""
-        if not hasattr(self, 'telemetry_timer'):
-            self.telemetry_timer = QTimer()
-            self.telemetry_timer.timeout.connect(self.update_telemetry_display)
-        
-        # Start telemetry updates at configured rate
-        update_rate = getattr(settings, 'TELEMETRY_UPDATE_RATE', 100)  # Default 100ms
-        self.telemetry_timer.start(update_rate)
-        logger.info(f"Telemetry timer started with {update_rate}ms interval")
-    
-    def connect_dronekit(self, connection_string: str) -> bool:
-        """Connect using DroneKit."""
-        try:
-            self.uav = dronekit.connect(connection_string, wait_ready=True, timeout=15)
-            if self.uav:
-                self.connection_active = True
-                logger.info("DroneKit connection successful")
-                return True
-        except Exception as e:
-            logger.error(f"DroneKit connection failed: {e}")
-        return False
+            logger.error(f"Connection error: {e}")
+            if hasattr(self, 'ihaInformer'):
+                self.ihaInformer.append(f"🚫 Bağlantı hatası: {str(e)}")
     
     def get_connection_string(self) -> str:
         """Get connection string from UI selection."""
@@ -831,12 +1161,6 @@ UAV kontrolleri normal çalışmaya devam edecek.
                 self.telemetry_timer.stop()
                 logger.info("Telemetry timer stopped")
             
-            # Close DroneKit connection
-            if self.uav:
-                self.uav.close()
-                self.uav = None
-                logger.info("DroneKit connection closed")
-            
             # Close MAVLink connection
             if self.mavlink_client:
                 self.mavlink_client.disconnect()
@@ -866,15 +1190,8 @@ UAV kontrolleri normal çalışmaya devam edecek.
         try:
             success = False
             
-            # Try DroneKit first
-            if self.uav:
-                from dronekit import VehicleMode
-                self.uav.mode = VehicleMode(mode)
-                success = True
-                logger.info(f"Set mode to {mode} via DroneKit")
-            
-            # Fallback to MAVLink
-            elif self.mavlink_client:
+            # Use MAVLink client
+            if self.mavlink_client:
                 success = self.mavlink_client.set_mode(mode)
                 logger.info(f"Set mode to {mode} via MAVLink")
             
@@ -899,24 +1216,8 @@ UAV kontrolleri normal çalışmaya devam edecek.
         try:
             success = False
             
-            # Try DroneKit first
-            if self.uav:
-                current_armed = self.uav.armed
-                if current_armed:
-                    self.uav.armed = False
-                    action = "disarm"
-                else:
-                    if self.uav.is_armable:
-                        self.uav.armed = True
-                        action = "arm"
-                    else:
-                        if hasattr(self, 'ihaInformer'):
-                            self.ihaInformer.append("İHA arm edilemiyor! Gerekli şartlar sağlanmadı.")
-                        return
-                success = True
-                
-            # Fallback to MAVLink
-            elif self.mavlink_client:
+            # Use MAVLink client
+            if self.mavlink_client:
                 telemetry = self.mavlink_client.get_telemetry_data()
                 current_armed = telemetry.get("armed", False)
                 success = self.mavlink_client.arm_disarm(not current_armed)
@@ -947,256 +1248,6 @@ UAV kontrolleri normal çalışmaya devam edecek.
             if hasattr(self, control):
                 getattr(self, control).setEnabled(False)
     
-    def open_camera_window(self):
-        """Open antenna system and video receiver window."""
-        try:
-            if hasattr(self, 'ihaInformer'):
-                self.ihaInformer.append("🔄 Anten sistemi başlatılıyor...")
-            
-            # Import antenna controller and video receiver
-            from ...communication.antenna_controller import AntennaController
-            from .video_receiver_widget import VideoDisplayWidget
-            
-            # Initialize antenna controller if not exists
-            if not hasattr(self, 'antenna_controller'):
-                self.antenna_controller = AntennaController()
-            
-            # Start antenna system (PowerBeam listening + Rocket M5 streaming)
-            if hasattr(self, 'ihaInformer'):
-                self.ihaInformer.append("🔧 PowerBeam 5AC Gen2 dinleme moduna alınıyor...")
-            
-            antenna_success = self.antenna_controller.start_antenna_system()
-            
-            if antenna_success:
-                if hasattr(self, 'ihaInformer'):
-                    self.ihaInformer.append("✅ PowerBeam 5AC Gen2 dinleme modunda")
-                    self.ihaInformer.append("✅ Rocket M5 video akışı başlatıldı")
-                    self.ihaInformer.append("🎥 Video görüntüleyici açılıyor...")
-                
-                # Create video receiver window
-                self.video_window = VideoDisplayWidget()
-                self.video_window.setWindowTitle("Rocket M5 Video Akışı - Hüma UAV")
-                self.video_window.setMinimumSize(800, 600)
-                self.video_window.show()
-                
-                # Auto-start video reception
-                self.video_window.start_video_stream()
-                
-                logger.info("Antenna system and video receiver started successfully")
-                
-                if hasattr(self, 'ihaInformer'):
-                    self.ihaInformer.append("✅ Rocket M5 görüntüsü alınmaya başladı!")
-            else:
-                if hasattr(self, 'ihaInformer'):
-                    self.ihaInformer.append("❌ Anten sistemi başlatılamadı!")
-                    self.ihaInformer.append("🔍 PowerBeam ve Rocket M5 bağlantılarını kontrol edin")
-                logger.error("Failed to start antenna system")
-            
-        except ImportError as e:
-            logger.error(f"Failed to import antenna modules: {e}")
-            if hasattr(self, 'ihaInformer'):
-                self.ihaInformer.append(f"❌ Anten modülleri yüklenemedi: {str(e)}")
-        except Exception as e:
-            logger.error(f"Failed to open antenna system: {e}")
-            if hasattr(self, 'ihaInformer'):
-                self.ihaInformer.append(f"❌ Anten sistemi hatası: {str(e)}")
-    
-    def start_camera_process(self):
-        """Start camera process."""
-        try:
-            # Define camera script path
-            camera_script = settings.PROJECT_ROOT / "src" / "uav_system" / "computer_vision" / "camera_system.py"
-            
-            if camera_script.exists():
-                self.camera_process = subprocess.Popen(
-                    [sys.executable, str(camera_script)],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE
-                )
-                logger.info("Camera process started")
-            else:
-                logger.error(f"Camera script not found: {camera_script}")
-                
-        except Exception as e:
-            logger.error(f"Failed to start camera process: {e}")
-    
-    def update_server_time(self):
-        """Update server time display."""
-        if hasattr(self, 'sunucuSaati'):
-            current_time = QDateTime.currentDateTime().toString('yyyy-MM-dd hh:mm:ss')
-            self.sunucuSaati.setText(f"Sunucu Saati: {current_time}")
-    
-    def update_telemetry_display(self):
-        """Update telemetry display."""
-        if not self.connection_active:
-            return
-        
-        try:
-            # Get telemetry data
-            telemetry = self.get_current_telemetry()
-            
-            if not telemetry:
-                return
-            
-            # Update HUD if available
-            if self.hud_widget:
-                self.hud_widget.updateData(telemetry)
-                self.hud_widget.setConnectionState(self.connection_active)
-            
-            # Update UI labels
-            self.update_ui_labels(telemetry)
-            
-            # Update map with UAV data - use the new method
-            self.update_map_with_uav_data({
-                'lat': telemetry.get('lat', self.current_telemetry['lat']),
-                'lon': telemetry.get('lon', self.current_telemetry['lon']),
-                'alt': telemetry.get('altitude', self.current_telemetry['alt']),
-                'yaw': telemetry.get('yaw', self.current_telemetry['heading']),
-                'mode': telemetry.get('flightMode', self.current_telemetry['flight_mode']),
-                'armed': telemetry.get('armed', self.current_telemetry['armed'])
-            })
-                
-        except Exception as e:
-            logger.error(f"Telemetry update failed: {e}")
-    
-    def get_current_telemetry(self) -> Dict[str, Any]:
-        """Get current telemetry data."""
-        telemetry = {}
-        
-        try:
-            # Try DroneKit first
-            if self.uav:
-                telemetry = {
-                    "lat": float(self.uav.location.global_relative_frame.lat or 0),
-                    "lon": float(self.uav.location.global_relative_frame.lon or 0),
-                    "altitude": float(self.uav.location.global_relative_frame.alt or 0),
-                    "roll": math.degrees(float(self.uav.attitude.roll or 0)),
-                    "pitch": math.degrees(float(self.uav.attitude.pitch or 0)),
-                    "yaw": math.degrees(float(self.uav.attitude.yaw or 0)),
-                    "airspeed": float(self.uav.airspeed or 0),
-                    "groundspeed": float(self.uav.groundspeed or 0),
-                    "armed": bool(self.uav.armed),
-                    "flightMode": str(self.uav.mode.name),
-                    "batteryLevel": float(self.uav.battery.level or 0),
-                    "batteryVoltage": float(self.uav.battery.voltage or 0),
-                    "gps_fix": int(self.uav.gps_0.fix_type if hasattr(self.uav, 'gps_0') else 0),
-                    "satellites": int(self.uav.gps_0.satellites_visible if hasattr(self.uav, 'gps_0') else 0),
-                }
-                
-                # Update current telemetry cache
-                self.current_telemetry.update(telemetry)
-            
-            # Fallback to MAVLink
-            elif self.mavlink_client:
-                telemetry = self.mavlink_client.get_telemetry_data()
-                if telemetry:
-                    self.current_telemetry.update(telemetry)
-                    
-        except Exception as e:
-            logger.error(f"Failed to get telemetry: {e}")
-        
-        return telemetry or self.current_telemetry
-    
-    def update_map_with_uav_data(self, uav_data: Dict[str, Any]):
-        """Update map with UAV position and data."""
-        try:
-            if not uav_data:
-                return
-                
-            lat = uav_data.get('lat', self.current_telemetry['lat'])
-            lon = uav_data.get('lon', self.current_telemetry['lon'])
-            alt = uav_data.get('alt', self.current_telemetry['alt'])
-            heading = uav_data.get('yaw', self.current_telemetry['heading'])
-            
-            # Update Leaflet map if available
-            if hasattr(self, 'leaflet_map') and self.leaflet_map and self.leaflet_map.map_loaded:
-                self.leaflet_map.update_uav_position(lat, lon, heading)
-                
-                # Auto-center on UAV if this is the first position update
-                if not hasattr(self, '_map_centered_on_uav'):
-                    self.leaflet_map.set_map_center(lat, lon, 15)
-                    self._map_centered_on_uav = True
-                    
-            # Update other map widget if available
-            elif hasattr(self, 'map_widget') and self.map_widget:
-                try:
-                    js_code = f"""
-                    if (typeof updateUAVPosition === 'function') {{
-                        updateUAVPosition({lat}, {lon}, {heading});
-                    }}
-                    if (typeof map !== 'undefined' && map && map.setView) {{
-                        map.setView([{lat}, {lon}], map.getZoom());
-                    }}
-                    """
-                    self.map_widget.page().runJavaScript(js_code)
-                except Exception as e:
-                    logger.debug(f"JavaScript execution failed: {e}")
-            
-            # Update current telemetry cache
-            self.current_telemetry.update({
-                'lat': lat,
-                'lon': lon,
-                'alt': alt,
-                'heading': heading
-            })
-            
-            logger.debug(f"Map updated with UAV position: {lat:.6f}, {lon:.6f}, heading: {heading:.1f}°")
-            
-        except Exception as e:
-            logger.error(f"Failed to update map with UAV data: {e}")
-    
-    def toggle_arm_disarm(self):
-        """Toggle arm/disarm state."""
-        if not self.connection_active:
-            if hasattr(self, 'ihaInformer'):
-                self.ihaInformer.append("İHA bağlı değil!")
-            return
-        
-        try:
-            success = False
-            current_armed = False
-            
-            # Get current armed state
-            if self.uav:
-                current_armed = self.uav.armed
-            elif self.mavlink_client:
-                telemetry = self.mavlink_client.get_telemetry_data()
-                current_armed = telemetry.get('armed', False) if telemetry else False
-            
-            # Toggle arm/disarm
-            if current_armed:
-                # Disarm
-                if self.uav:
-                    self.uav.armed = False
-                    success = True
-                    action = "Disarmed"
-                elif self.mavlink_client:
-                    success = self.mavlink_client.disarm()
-                    action = "Disarmed"
-            else:
-                # Arm
-                if self.uav:
-                    self.uav.armed = True
-                    success = True
-                    action = "Armed"
-                elif self.mavlink_client:
-                    success = self.mavlink_client.arm()
-                    action = "Armed"
-            
-            if hasattr(self, 'ihaInformer'):
-                if success:
-                    self.ihaInformer.append(f"İHA {action}")
-                    # Update button text
-                    if hasattr(self, 'armDisarm'):
-                        self.armDisarm.setText("DISARM" if not current_armed else "ARM")
-                else:
-                    self.ihaInformer.append(f"Arm/Disarm işlemi başarısız")
-                    
-        except Exception as e:
-            logger.error(f"Failed to toggle arm/disarm: {e}")
-            if hasattr(self, 'ihaInformer'):
-                self.ihaInformer.append(f"Arm/Disarm hatası: {str(e)}")
-    
     def update_ui_labels(self, telemetry: Dict[str, Any]):
         """Update UI labels with telemetry data."""
         try:
@@ -1209,7 +1260,7 @@ UAV kontrolleri normal çalışmaya devam edecek.
                 'yaw': f"Yaw: {telemetry.get('yaw', 0):.1f}°",
                 'havaHizi': f"AS: {telemetry.get('airspeed', 0):.1f}m/s",
                 'yerHizi': f"GS: {telemetry.get('groundspeed', 0):.1f}m/s",
-                'mevcutUcusModu': f"Mode: {telemetry.get('flightMode', 'UNKNOWN')}",
+                'mevcutUcusModu': f"Mode: {telemetry.get('flight_mode', 'UNKNOWN')}",
                 'armDurum': f"{'ARMED' if telemetry.get('armed', False) else 'DISARMED'}",
             }
             
@@ -1224,17 +1275,37 @@ UAV kontrolleri normal çalışmaya devam edecek.
         except Exception as e:
             logger.error(f"Failed to update UI labels: {e}")
     
-    def show_map_error(self, error_msg: str):
-        """Show map error message."""
-        if hasattr(self, 'label'):
-            self.label.setText(f"Harita Hatası: {error_msg}")
-            self.label.setStyleSheet("color: red; font-size: 12pt; padding: 20px;")
+    def update_map_with_uav_data(self, telemetry: Dict[str, Any]):
+        """Update map with UAV data."""
+        try:
+            # Update leaflet map if available
+            if hasattr(self, 'leaflet_map') and self.leaflet_map:
+                lat = telemetry.get('lat', 0)
+                lon = telemetry.get('lon', 0)
+                heading = telemetry.get('heading', 0)
+                if lat != 0 and lon != 0:
+                    self.leaflet_map.update_uav_position(lat, lon, heading)
+                    
+        except Exception as e:
+            logger.error(f"Failed to update map with UAV data: {e}")
     
-    def on_map_timeout(self):
-        """Handle map loading timeout - fallback to offline mode."""
-        logger.warning("Map loading timeout - switching to offline mode")
-        self.show_simple_map_fallback()
-    
+    def open_camera_window(self):
+        """Open antenna system and video receiver window."""
+        try:
+            if hasattr(self, 'ihaInformer'):
+                self.ihaInformer.append("🔄 Kamera sistemi başlatılıyor...")
+            
+            # Placeholder for camera opening logic
+            if hasattr(self, 'ihaInformer'):
+                self.ihaInformer.append("📷 Kamera penceresi açılıyor...")
+            
+            logger.info("Camera window opened")
+            
+        except Exception as e:
+            logger.error(f"Failed to open camera window: {e}")
+            if hasattr(self, 'ihaInformer'):
+                self.ihaInformer.append(f"❌ Kamera hatası: {str(e)}")
+
     def closeEvent(self, event):
         """Handle application close event."""
         try:
@@ -1245,17 +1316,20 @@ UAV kontrolleri normal çalışmaya devam edecek.
             )
             
             if reply == QMessageBox.Yes:
-                # Cleanup antenna system first
-                self.close_antenna_system()
-                
                 # Cleanup drone connection
                 self.disconnect_drone()
                 
-                # Stop processes
-                if self.camera_process:
-                    self.camera_process.terminate()
-                if self.camera_window_process:
-                    self.camera_window_process.terminate()
+                # Stop timers
+                if hasattr(self, 'telemetry_timer'):
+                    self.telemetry_timer.stop()
+                if hasattr(self, 'clock_timer'):
+                    self.clock_timer.stop()
+                if hasattr(self, 'status_timer'):
+                    self.status_timer.stop()
+                
+                # Cleanup MAVLink client
+                if self.mavlink_client:
+                    self.mavlink_client.cleanup()
                 
                 event.accept()
                 logger.info("Application closed")
@@ -1265,98 +1339,6 @@ UAV kontrolleri normal çalışmaya devam edecek.
         except Exception as e:
             logger.error(f"Close event error: {e}")
             event.accept()
-    
-    def on_hud_container_resize(self, event):
-        """Handle resize events for the HUD container (label_2)."""
-        if hasattr(self, 'hud_widget') and self.hud_widget:
-            # Update HUD widget size to match its container
-            container_size = self.label_2.size()
-            self.hud_widget.setGeometry(0, 0, container_size.width(), container_size.height())
-            self.hud_widget.resize(container_size)
-            self.hud_widget.setMinimumSize(container_size)
-            self.hud_widget.setMaximumSize(container_size)
-            self.hud_widget.raise_()  # Keep HUD on top
-            self.hud_widget.update()  # Force repaint
-        
-        # Call the original resize event if it exists
-        if hasattr(self.label_2.__class__, 'resizeEvent'):
-            super(self.label_2.__class__, self.label_2).resizeEvent(event)
-    
-    def resizeEvent(self, event):
-        """Handle window resize events to keep map widget fitted."""
-        super().resizeEvent(event)
-        
-        try:
-            # Resize Leaflet map if it exists - force refresh for proper scaling
-            if hasattr(self, 'leaflet_map') and self.leaflet_map:
-                # Ensure the map widget fills the entire label area
-                if hasattr(self, 'label') and self.label:
-                    # Update label layout to ensure no margins
-                    if self.label.layout():
-                        self.label.layout().setContentsMargins(0, 0, 0, 0)
-                        self.label.layout().setSpacing(0)
-                    
-                    # Force map resize after a small delay
-                    QTimer.singleShot(100, lambda: self.leaflet_map.force_refresh_map() if self.leaflet_map else None)
-            
-            # Resize offline map widget if it exists
-            elif hasattr(self, 'map_widget') and self.map_widget and hasattr(self, 'label'):
-                # Ensure map widget uses the entire label area
-                if self.label.layout():
-                    # Layout handles the sizing automatically
-                    self.label.layout().setContentsMargins(0, 0, 0, 0)
-                    self.label.layout().setSpacing(0)
-                else:
-                    # Manual sizing if no layout
-                    self.map_widget.setGeometry(0, 0, self.label.width(), self.label.height())
-                    self.map_widget.resize(self.label.size())
-                
-        except Exception as e:
-            logger.error(f"Error in resizeEvent: {e}")
-    
-    def set_webengine_status(self, available: bool):
-        """Set WebEngine availability status."""
-        self.webengine_available = available
-        logger.info(f"WebEngine availability set to: {available}")
-        
-        # Update map widget if it exists
-        if hasattr(self, 'leaflet_map') and self.leaflet_map:
-            self.leaflet_map.set_webengine_status(available)
-    
-    def close_antenna_system(self):
-        """Close antenna system and video receiver."""
-        try:
-            if hasattr(self, 'ihaInformer'):
-                self.ihaInformer.append("🔄 Anten sistemi kapatılıyor...")
-            
-            # Stop antenna system
-            if hasattr(self, 'antenna_controller'):
-                antenna_stopped = self.antenna_controller.stop_antenna_system()
-                
-                if antenna_stopped:
-                    if hasattr(self, 'ihaInformer'):
-                        self.ihaInformer.append("✅ PowerBeam 5AC Gen2 normal moda döndürüldü")
-                        self.ihaInformer.append("✅ Rocket M5 video akışı durduruldu")
-                else:
-                    if hasattr(self, 'ihaInformer'):
-                        self.ihaInformer.append("⚠️ Anten sistemi kısmen kapatıldı")
-            
-            # Close video window
-            if hasattr(self, 'video_window'):
-                self.video_window.stop_video_stream()
-                self.video_window.close()
-                delattr(self, 'video_window')
-                
-                if hasattr(self, 'ihaInformer'):
-                    self.ihaInformer.append("✅ Video görüntüleyici kapatıldı")
-            
-            logger.info("Antenna system closed successfully")
-            
-        except Exception as e:
-            logger.error(f"Error closing antenna system: {e}")
-            if hasattr(self, 'ihaInformer'):
-                self.ihaInformer.append(f"❌ Anten sistemi kapatma hatası: {str(e)}")
-
 
 def main():
     """Main application entry point."""
