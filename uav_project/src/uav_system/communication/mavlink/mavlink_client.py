@@ -5,6 +5,7 @@ Improved MAVLink Client for UAV communication.
 import socket
 import threading
 import time
+import math
 from typing import Dict, Any, Optional, Callable, Tuple
 from pymavlink import mavutil
 from pymavlink.dialects.v20 import common as mavlink
@@ -114,7 +115,9 @@ class MAVLinkClient(BaseProtocol):
             # Create MAVLink connection
             self.connection = mavutil.mavlink_connection(
                 connection_string,
-                timeout=10
+                timeout=10,
+                autoreconnect=True,
+                baud=57600
             )
             
             if not self.connection:
@@ -131,6 +134,9 @@ class MAVLinkClient(BaseProtocol):
                 self.last_heartbeat = time.time()
                 
                 self.logger.info(f"Connected to vehicle with system ID: {self.system_id}")
+                self.logger.info(f"Vehicle type: {heartbeat.type}")
+                self.logger.info(f"Vehicle autopilot: {heartbeat.autopilot}")
+                self.logger.info(f"Vehicle mode: {heartbeat.custom_mode}")
                 
                 # Start telemetry thread
                 self.start_telemetry_thread()
@@ -197,16 +203,27 @@ class MAVLinkClient(BaseProtocol):
     
     def _telemetry_loop(self):
         """Background telemetry reading loop."""
+        self.logger.info("Telemetry loop started")
+        message_count = 0
+        
         while self._running and self._connected:
             try:
                 msg = self.connection.recv_match(blocking=False, timeout=0.1)
                 if msg:
                     self._process_message(msg)
+                    message_count += 1
+                    
+                    # Log telemetry status every 1000 messages
+                    if message_count % 1000 == 0:
+                        self.logger.debug(f"Processed {message_count} messages")
+                        
                 time.sleep(0.01)  # Small delay to prevent CPU overload
                 
             except Exception as e:
                 self.logger.error(f"Telemetry loop error: {e}")
                 time.sleep(0.1)
+        
+        self.logger.info("Telemetry loop stopped")
     
     def _process_message(self, msg):
         """Process received MAVLink message."""
@@ -256,9 +273,15 @@ class MAVLinkClient(BaseProtocol):
     
     def _handle_attitude(self, msg):
         """Handle ATTITUDE message."""
+        # Store raw radians for internal use and conversion
         self.telemetry_data['roll'] = msg.roll
         self.telemetry_data['pitch'] = msg.pitch
         self.telemetry_data['yaw'] = msg.yaw
+        
+        # Also store converted degrees for compatibility
+        self.telemetry_data['roll_deg'] = math.degrees(msg.roll)
+        self.telemetry_data['pitch_deg'] = math.degrees(msg.pitch)
+        self.telemetry_data['yaw_deg'] = math.degrees(msg.yaw)
     
     def _handle_global_position(self, msg):
         """Handle GLOBAL_POSITION_INT message."""

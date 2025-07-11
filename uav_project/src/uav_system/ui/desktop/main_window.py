@@ -255,7 +255,12 @@ class HumaGCS(QMainWindow):
             
             # Try to create Leaflet online map first
             if LEAFLET_MAP_AVAILABLE and self.webengine_available:
-                self.create_leaflet_map()
+                try:
+                    self.create_leaflet_map()
+                except Exception as e:
+                    logger.error(f"Failed to create Leaflet map: {e}")
+                    self.webengine_available = False
+                    self.create_offline_map()
             else:
                 logger.warning("Leaflet map not available, falling back to offline map")
                 self.create_offline_map()
@@ -265,6 +270,25 @@ class HumaGCS(QMainWindow):
         except Exception as e:
             logger.error(f"Map view setup failed: {e}")
             self.show_map_error(f"Harita kurulumu hatası: {str(e)}")
+    
+    def show_map_error(self, error_message: str):
+        """Show map error message."""
+        try:
+            if hasattr(self, 'label'):
+                self.label.setText(f"❌ Harita Hatası:\n{error_message}")
+                self.label.setStyleSheet("""
+                    QLabel {
+                        color: red;
+                        font-size: 12pt;
+                        font-weight: bold;
+                        background: #2c2c2c;
+                        padding: 20px;
+                        border-radius: 10px;
+                        border: 2px solid red;
+                    }
+                """)
+        except Exception as e:
+            logger.error(f"Failed to show map error: {e}")
     
     def create_leaflet_map(self):
         """Create Leaflet online map."""
@@ -643,7 +667,6 @@ UAV kontrolleri normal çalışmaya devam edecek.
             from PyQt5.QtWidgets import QSizePolicy
             self.hud_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
             self.hud_widget.setMinimumSize(self.label_2.size())
-            self.hud_widget.setMaximumSize(self.label_2.size())
             
             # Clear label content and make it transparent
             self.label_2.setText("")
@@ -669,6 +692,23 @@ UAV kontrolleri normal çalışmaya devam edecek.
             if hasattr(self, 'label_2'):
                 self.label_2.setText(f"HUD yüklenemedi: {str(e)}")
                 self.label_2.setStyleSheet("color: red; font-size: 12pt;")
+    
+    def on_hud_container_resize(self, event):
+        """Handle HUD container resize event."""
+        try:
+            if hasattr(self, 'hud_widget') and self.hud_widget:
+                # Resize HUD to match container
+                new_size = event.size()
+                self.hud_widget.setGeometry(0, 0, new_size.width(), new_size.height())
+                self.hud_widget.resize(new_size)
+                self.hud_widget.update()
+                
+        except Exception as e:
+            logger.error(f"Failed to resize HUD: {e}")
+        
+        # Call the original resize event if it exists
+        if hasattr(self.label_2, '_original_resize_event'):
+            self.label_2._original_resize_event(event)
     
     def setup_ui_connections(self):
         """Setup UI button connections and signals."""
@@ -739,6 +779,9 @@ UAV kontrolleri normal çalışmaya devam edecek.
         """Update telemetry data and UI."""
         try:
             if not self.connection_active or not self.mavlink_client:
+                # Update HUD with disconnected state
+                if hasattr(self, 'hud_widget') and self.hud_widget:
+                    self.hud_widget.setConnectionState(False)
                 return
             
             # Get telemetry data
@@ -750,6 +793,13 @@ UAV kontrolleri normal çalışmaya devam edecek.
                 
                 # Update UI labels
                 self.update_ui_labels(telemetry)
+                
+                # Update HUD widget with new data
+                if hasattr(self, 'hud_widget') and self.hud_widget:
+                    self.hud_widget.setConnectionState(True)
+                    # Map telemetry data to HUD format
+                    hud_data = self.map_telemetry_to_hud_format(telemetry)
+                    self.hud_widget.updateData(hud_data)
                 
                 # Update map with UAV data
                 self.update_map_with_uav_data(telemetry)
@@ -1101,6 +1151,9 @@ UAV kontrolleri normal çalışmaya devam edecek.
             if hasattr(self, 'ihaInformer'):
                 self.ihaInformer.append(f"🔗 Bağlantı: {connection_string}")
             
+            # Reset connection state
+            self.connection_active = False
+            
             # Connect MAVLink client
             success = False
             if self.mavlink_client:
@@ -1110,24 +1163,45 @@ UAV kontrolleri normal çalışmaya devam edecek.
                 self.connection_active = True
                 if hasattr(self, 'ihaInformer'):
                     self.ihaInformer.append("✅ İHA bağlantısı kuruldu!")
+                    self.ihaInformer.append("📊 Telemetri verileri alınıyor...")
                     
                 if hasattr(self, 'baglanti'):
                     self.baglanti.setText("Bağlantı: 🟢 Aktif")
                 
+                # Update HUD connection state
+                if hasattr(self, 'hud_widget') and self.hud_widget:
+                    self.hud_widget.setConnectionState(True)
+                
                 self.enable_flight_controls()
+                
+                # Start telemetry timer if not already running
+                if hasattr(self, 'telemetry_timer') and not self.telemetry_timer.isActive():
+                    self.telemetry_timer.start(settings.TELEMETRY_UPDATE_RATE)
+                
                 logger.info("Drone connected successfully")
             else:
                 if hasattr(self, 'ihaInformer'):
                     self.ihaInformer.append("❌ İHA bağlantısı başarısız!")
+                    self.ihaInformer.append("🔍 Gazebo simülasyonu çalışıyor mu?")
+                    self.ihaInformer.append("🌐 UDP 127.0.0.1:14550 erişilebilir mi?")
                     
                 if hasattr(self, 'baglanti'):
                     self.baglanti.setText("Bağlantı: 🔴 Başarısız")
+                
+                # Update HUD connection state
+                if hasattr(self, 'hud_widget') and self.hud_widget:
+                    self.hud_widget.setConnectionState(False)
+                
                 logger.error("Drone connection failed")
                 
         except Exception as e:
             logger.error(f"Connection error: {e}")
             if hasattr(self, 'ihaInformer'):
                 self.ihaInformer.append(f"🚫 Bağlantı hatası: {str(e)}")
+            
+            # Update HUD connection state
+            if hasattr(self, 'hud_widget') and self.hud_widget:
+                self.hud_widget.setConnectionState(False)
     
     def get_connection_string(self) -> str:
         """Get connection string from UI selection."""
@@ -1155,6 +1229,10 @@ UAV kontrolleri normal çalışmaya devam edecek.
         """Disconnect from the drone."""
         try:
             self.connection_active = False
+            
+            # Update HUD connection state immediately
+            if hasattr(self, 'hud_widget') and self.hud_widget:
+                self.hud_widget.setConnectionState(False)
             
             # Stop telemetry updates
             if hasattr(self, 'telemetry_timer'):
@@ -1248,6 +1326,39 @@ UAV kontrolleri normal çalışmaya devam edecek.
             if hasattr(self, control):
                 getattr(self, control).setEnabled(False)
     
+    def map_telemetry_to_hud_format(self, telemetry: Dict[str, Any]) -> Dict[str, Any]:
+        """Map MAVLink telemetry data to HUD widget format."""
+        try:
+            # Map MAVLink field names to HUD widget field names
+            hud_data = {
+                'roll': math.degrees(telemetry.get('roll', 0.0)),  # Convert from radians to degrees
+                'pitch': math.degrees(telemetry.get('pitch', 0.0)),  # Convert from radians to degrees
+                'yaw': math.degrees(telemetry.get('yaw', 0.0)),  # Convert from radians to degrees
+                'airspeed': telemetry.get('airspeed', 0.0),
+                'groundspeed': telemetry.get('groundspeed', 0.0),
+                'altitude': telemetry.get('altitude', 0.0),
+                'throttle': telemetry.get('throttle', 0.0),
+                'batteryLevel': telemetry.get('battery_level', 0.0),
+                'batteryVoltage': telemetry.get('battery_voltage', 0.0),
+                'batteryCurrent': telemetry.get('battery_current', 0.0),
+                'armed': telemetry.get('armed', False),
+                'armable': telemetry.get('armable', False),
+                'flightMode': telemetry.get('flight_mode', 'UNKNOWN'),
+                'gpsStatus': telemetry.get('gps_fix', 0),
+                'gpsSatellites': telemetry.get('satellites', 0),
+                'waypointDist': 0.0,  # TODO: Calculate waypoint distance
+                'targetBearing': 0.0,  # TODO: Calculate target bearing
+                'lat': telemetry.get('lat', 0.0),
+                'lon': telemetry.get('lon', 0.0),
+                'heading': telemetry.get('heading', 0.0)
+            }
+            
+            return hud_data
+            
+        except Exception as e:
+            logger.error(f"Failed to map telemetry to HUD format: {e}")
+            return {}
+
     def update_ui_labels(self, telemetry: Dict[str, Any]):
         """Update UI labels with telemetry data."""
         try:
