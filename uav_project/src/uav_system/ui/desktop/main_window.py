@@ -793,7 +793,12 @@ UAV kontrolleri normal çalışmaya devam edecek.
                 if hasattr(self, 'ihaInformer'):
                     self.ihaInformer.append("✅ Otonom kalkış komutu başarıyla gönderildi!")
                     self.ihaInformer.append(f"🎯 Hedef irtifa: {altitude}m")
-                    self.ihaInformer.append("📡 Uçuş modu: AUTO")
+                    # Get actual mode from telemetry instead of hardcoding
+                    current_mode = "UNKNOWN"
+                    if hasattr(self, 'mavlink_client') and self.mavlink_client:
+                        telemetry = self.mavlink_client.get_telemetry_data()
+                        current_mode = telemetry.get('flight_mode', 'UNKNOWN')
+                    self.ihaInformer.append(f"📡 Uçuş modu: {current_mode}")
                 logger.info(f"Autonomous takeoff initiated to {altitude}m")
             else:
                 if hasattr(self, 'ihaInformer'):
@@ -865,7 +870,12 @@ UAV kontrolleri normal çalışmaya devam edecek.
                 if hasattr(self, 'ihaInformer'):
                     self.ihaInformer.append("✅ Otonom iniş komutu başarıyla gönderildi!")
                     self.ihaInformer.append("🎯 İniş sırası: Yaklaşma → İniş")
-                    self.ihaInformer.append("📡 Uçuş modu: AUTO")
+                    # Get actual mode from telemetry instead of hardcoding
+                    current_mode = "UNKNOWN"
+                    if hasattr(self, 'mavlink_client') and self.mavlink_client:
+                        telemetry = self.mavlink_client.get_telemetry_data()
+                        current_mode = telemetry.get('flight_mode', 'UNKNOWN')
+                    self.ihaInformer.append(f"📡 Uçuş modu: {current_mode}")
                 logger.info(f"Autonomous landing initiated at {lat:.6f}, {lon:.6f}")
             else:
                 if hasattr(self, 'ihaInformer'):
