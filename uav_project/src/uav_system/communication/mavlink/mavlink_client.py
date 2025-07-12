@@ -319,14 +319,38 @@ class MAVLinkClient(BaseProtocol):
         try:
             # Get mode number from name
             mode_mapping = self.connection.mode_mapping()
-            if mode_name in mode_mapping:
-                mode_id = mode_mapping[mode_name]
-                self.connection.set_mode(mode_id)
-                self.logger.info(f"Set mode to {mode_name}")
-                return True
-            else:
+            if mode_name not in mode_mapping:
                 self.logger.error(f"Unknown mode: {mode_name}")
                 return False
+            
+            mode_id = mode_mapping[mode_name]
+            self.logger.info(f"Setting mode to {mode_name} (ID: {mode_id})")
+            
+            # Send mode change command
+            self.connection.set_mode(mode_id)
+            
+            # Wait for mode change confirmation
+            timeout = 10  # 10 second timeout
+            start_time = time.time()
+            while time.time() - start_time < timeout:
+                try:
+                    msg = self.connection.recv_match(type='HEARTBEAT', blocking=True, timeout=1)
+                    if msg:
+                        current_mode = mavutil.mode_string_v10(msg)
+                        if current_mode == mode_name:
+                            self.logger.info(f"Mode successfully changed to {mode_name}")
+                            return True
+                        else:
+                            self.logger.debug(f"Current mode: {current_mode}, waiting for {mode_name}...")
+                except Exception as e:
+                    self.logger.warning(f"Error checking mode change: {e}")
+                
+                time.sleep(0.1)
+            
+            # If we get here, mode change failed
+            self.logger.error(f"Mode change to {mode_name} timed out")
+            return False
+            
         except Exception as e:
             self.logger.error(f"Failed to set mode: {e}")
             return False
@@ -402,51 +426,14 @@ class MAVLinkClient(BaseProtocol):
             if not self.set_mode('GUIDED'):
                 self.logger.error("Failed to set GUIDED mode")
                 return False
+            time.sleep(1)  # Wait for mode change to take effect
             
             # Step 2: Arm the vehicle
             if not self.arm_disarm(arm=True):
                 self.logger.error("Failed to arm vehicle")
                 return False
             
-            # Step 3: Get current location
-            location = self.get_location()
-            if not location:
-                self.logger.error("Failed to get current location")
-                return False
-            
-            lat, lon = location
-            
-            # Step 4: Clear existing mission
-            self.connection.mav.mission_clear_all_send(
-                self.connection.target_system, 
-                self.connection.target_component
-            )
-            time.sleep(1)
-            
-            # Step 5: Set mission count
-            self.connection.mav.mission_count_send(
-                self.connection.target_system, 
-                self.connection.target_component, 
-                1
-            )
-            time.sleep(0.5)
-            
-            # Step 6: Send takeoff mission item
-            self.connection.mav.mission_item_send(
-                self.connection.target_system,
-                self.connection.target_component,
-                0,  # sequence
-                mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT,
-                mavutil.mavlink.MAV_CMD_NAV_TAKEOFF,
-                0, 1,    # current=0, autocontinue=1
-                0, 0, 0, 0,  # params 1-4 unused here
-                lat, lon, altitude  # location and altitude
-            )
-            
-            print("Waiting for mission ACK...")
-            self.logger.info("Waiting for mission acknowledgment...")
-            
-            # Step 7: Wait for vehicle to be armed
+            # Step 3: Wait for vehicle to be armed
             timeout = 30  # 30 second timeout
             start_time = time.time()
             while time.time() - start_time < timeout:
@@ -462,9 +449,121 @@ class MAVLinkClient(BaseProtocol):
                 self.logger.error("Vehicle failed to arm within timeout")
                 return False
             
-            # Step 8: Set mode to AUTO to execute mission
+            # Step 4: Get current location
+            location = self.get_location()
+            if not location:
+                self.logger.error("Failed to get current location")
+                return False
+            
+            lat, lon = location
+            
+            # Step 5: Clear existing mission
+            self.logger.info("Clearing existing mission...")
+            self.connection.mav.mission_clear_all_send(
+                self.connection.target_system, 
+                self.connection.target_component
+            )
+            
+            # Wait for mission clear acknowledgment
+            mission_ack_timeout = 10
+            start_time = time.time()
+            while time.time() - start_time < mission_ack_timeout:
+                try:
+                    msg = self.connection.recv_match(type='MISSION_ACK', blocking=True, timeout=2)
+                    if msg:
+                        if msg.type == mavutil.mavlink.MAV_MISSION_ACCEPTED:
+                            self.logger.info("Mission cleared successfully")
+                            break
+                        else:
+                            self.logger.warning(f"Mission clear failed with type: {msg.type}")
+                            return False
+                except Exception as e:
+                    self.logger.warning(f"Error waiting for mission clear ACK: {e}")
+            
+            # Step 6: Set mission count
+            self.logger.info("Setting mission count...")
+            self.connection.mav.mission_count_send(
+                self.connection.target_system, 
+                self.connection.target_component, 
+                1
+            )
+            
+            # Step 7: Wait for mission request
+            start_time = time.time()
+            while time.time() - start_time < mission_ack_timeout:
+                try:
+                    msg = self.connection.recv_match(type='MISSION_REQUEST', blocking=True, timeout=2)
+                    if msg and msg.seq == 0:
+                        self.logger.info("Mission request received for item 0")
+                        break
+                except Exception as e:
+                    self.logger.warning(f"Error waiting for mission request: {e}")
+            else:
+                self.logger.error("No mission request received")
+                return False
+            
+            # Step 8: Send takeoff mission item
+            self.logger.info(f"Sending takeoff mission item to {altitude}m")
+            self.connection.mav.mission_item_int_send(
+                self.connection.target_system,
+                self.connection.target_component,
+                0,  # sequence
+                mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT,
+                mavutil.mavlink.MAV_CMD_NAV_TAKEOFF,
+                1, 1,    # current=1, autocontinue=1 (first item should be current)
+                0, 0, 0, 0,  # params 1-4 unused for takeoff
+                int(lat * 1e7),   # lat in int format
+                int(lon * 1e7),   # lon in int format
+                altitude  # altitude
+            )
+            
+            # Step 9: Wait for mission acknowledgment
+            print("Waiting for mission ACK...")
+            self.logger.info("Waiting for mission acknowledgment...")
+            
+            start_time = time.time()
+            while time.time() - start_time < mission_ack_timeout:
+                try:
+                    msg = self.connection.recv_match(type='MISSION_ACK', blocking=True, timeout=2)
+                    if msg:
+                        if msg.type == mavutil.mavlink.MAV_MISSION_ACCEPTED:
+                            self.logger.info("Mission accepted successfully")
+                            break
+                        else:
+                            self.logger.error(f"Mission rejected with type: {msg.type}")
+                            return False
+                except Exception as e:
+                    self.logger.warning(f"Error waiting for mission ACK: {e}")
+            else:
+                self.logger.error("No mission acknowledgment received")
+                return False
+            
+            # Step 10: Set mode to AUTO to execute mission
+            self.logger.info("Setting mode to AUTO...")
             if not self.set_mode('AUTO'):
                 self.logger.error("Failed to set AUTO mode")
+                return False
+            
+            # Step 11: Verify mode change
+            time.sleep(2)  # Wait for mode change to stabilize
+            mode_verified = False
+            for _ in range(10):  # Try for 10 seconds
+                try:
+                    msg = self.connection.recv_match(type='HEARTBEAT', blocking=True, timeout=1)
+                    if msg:
+                        current_mode = mavutil.mode_string_v10(msg)
+                        if current_mode == 'AUTO':
+                            self.logger.info("Successfully switched to AUTO mode")
+                            mode_verified = True
+                            break
+                        else:
+                            self.logger.info(f"Current mode: {current_mode}, waiting for AUTO...")
+                except Exception as e:
+                    self.logger.warning(f"Error checking mode: {e}")
+                time.sleep(1)
+            
+            if not mode_verified:
+                self.logger.error("Failed to verify AUTO mode switch")
                 return False
             
             self.logger.info("Autonomous takeoff sequence completed successfully")
