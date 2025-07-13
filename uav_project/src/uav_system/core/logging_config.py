@@ -7,8 +7,15 @@ import logging.handlers
 import os
 import sys
 from typing import Optional
-import structlog
 from pathlib import Path
+
+# Try to import structlog, but provide fallback if not available
+try:
+    import structlog
+    STRUCTLOG_AVAILABLE = True
+except ImportError:
+    STRUCTLOG_AVAILABLE = False
+    structlog = None
 
 
 def setup_logging(
@@ -61,8 +68,8 @@ def setup_logging(
         file_handler.setFormatter(formatter)
         root_logger.addHandler(file_handler)
     
-    # Configure structured logging if enabled
-    if enable_structured:
+    # Configure structured logging if enabled and available
+    if enable_structured and STRUCTLOG_AVAILABLE:
         structlog.configure(
             processors=[
                 structlog.stdlib.filter_by_level,
@@ -80,6 +87,9 @@ def setup_logging(
             wrapper_class=structlog.stdlib.BoundLogger,
             cache_logger_on_first_use=True,
         )
+    elif enable_structured and not STRUCTLOG_AVAILABLE:
+        # Fallback: just use regular logging
+        pass
 
 
 def get_logger(name: str) -> logging.Logger:

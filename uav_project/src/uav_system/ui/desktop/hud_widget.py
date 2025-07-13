@@ -80,11 +80,13 @@ class HUDWidget(QWidget):
         """Bağlantı durumunu ayarla"""
         self._isConnected = connected
         self.update()  # HUD görüntüsünü yenile
+        self.repaint()  # Force immediate repaint
 
     def updateData(self, data: dict):
         """Dışarıdan gelen telemetri verilerini al ve yeniden çiz."""
         self._data.update(data)
         self.update()
+        self.repaint()  # Force immediate repaint
         
     def paintEvent(self, event):
         # Get widget dimensions
@@ -1020,6 +1022,22 @@ class HUDWidget(QWidget):
     def set_connection_status(self, connected: bool):
         """Set connection status (compatibility method)"""
         self.setConnectionState(connected)
+    
+    def force_update(self):
+        """Force immediate update of the HUD widget"""
+        self.update()
+        self.repaint()
+        
+    def get_debug_info(self):
+        """Get debug information about the HUD widget state"""
+        return {
+            'connected': self._isConnected,
+            'visible': self.isVisible(),
+            'size': (self.width(), self.height()),
+            'parent_size': (self.parent().size().width(), self.parent().size().height()) if self.parent() else None,
+            'data_keys': list(self._data.keys()),
+            'sample_data': {k: v for k, v in list(self._data.items())[:5]}
+        }
 
     def showEvent(self, event):
         """Override showEvent to ensure HUD fills the entire parent area."""
@@ -1030,9 +1048,11 @@ class HUDWidget(QWidget):
             self.setGeometry(0, 0, parent_size.width(), parent_size.height())
             self.resize(parent_size)
             self.update()
+            self.repaint()  # Force immediate repaint
 
     def resizeEvent(self, event):
         """Override resizeEvent to handle size changes properly."""
         super().resizeEvent(event)
         # Force update when size changes
         self.update()
+        self.repaint()  # Force immediate repaint
