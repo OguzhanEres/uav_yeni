@@ -6,8 +6,9 @@ from PyQt5.QtGui import (
     QPainter, QColor, QPen, QFont, QPainterPath, 
     QFontMetrics, QPolygon, QRadialGradient, QBrush, QLinearGradient
 )
-from PyQt5.QtCore import Qt, QRectF, QLineF, QPointF, QPoint, QRect
+from PyQt5.QtCore import Qt, QRectF, QLineF, QPointF, QPoint, QRect, QTimer
 import math
+import time
 
 
 class HUDWidget(QWidget):
@@ -33,6 +34,14 @@ class HUDWidget(QWidget):
         self._gpsSatellites = 0    # Görünür uydu sayısı
         self._waypointDist = 0.0   # Hedef noktaya mesafe
         self._targetBearing = 0.0  # Hedef yönü
+        
+        # Update throttling
+        self._last_update = 0.0
+        self._update_throttle_ms = 50  # Minimum 50ms between updates
+        self._update_timer = QTimer()
+        self._update_timer.setSingleShot(True)
+        self._update_timer.timeout.connect(self._do_update)
+        self._pending_update = False
         
         # Koyu tema renkleri
         self._backgroundColor = QColor(10, 10, 20)  # Çok koyu lacivert
@@ -79,12 +88,30 @@ class HUDWidget(QWidget):
     def setConnectionState(self, connected):
         """Bağlantı durumunu ayarla"""
         self._isConnected = connected
-        self.update()  # HUD görüntüsünü yenile
+        self._do_update()  # Use throttled update
 
     def updateData(self, data: dict):
         """Dışarıdan gelen telemetri verilerini al ve yeniden çiz."""
         self._data.update(data)
+        
+        # Throttle updates to prevent flickering
+        current_time = time.time() * 1000  # Convert to milliseconds
+        if current_time - self._last_update < self._update_throttle_ms:
+            # Schedule update for later if not already scheduled
+            if not self._pending_update:
+                self._pending_update = True
+                remaining_time = self._update_throttle_ms - (current_time - self._last_update)
+                self._update_timer.start(int(remaining_time))
+        else:
+            # Update immediately
+            self._do_update()
+    
+    def _do_update(self):
+        """Perform the actual update."""
+        self._last_update = time.time() * 1000
+        self._pending_update = False
         self.update()
+        self.repaint()  # Force immediate repaint
         
     def paintEvent(self, event):
         # Get widget dimensions
@@ -1020,6 +1047,21 @@ class HUDWidget(QWidget):
     def set_connection_status(self, connected: bool):
         """Set connection status (compatibility method)"""
         self.setConnectionState(connected)
+    
+    def force_update(self):
+        """Force immediate update of the HUD widget"""
+        self._do_update()
+        
+    def get_debug_info(self):
+        """Get debug information about the HUD widget state"""
+        return {
+            'connected': self._isConnected,
+            'visible': self.isVisible(),
+            'size': (self.width(), self.height()),
+            'parent_size': (self.parent().size().width(), self.parent().size().height()) if self.parent() else None,
+            'data_keys': list(self._data.keys()),
+            'sample_data': {k: v for k, v in list(self._data.items())[:5]}
+        }
 
     def showEvent(self, event):
         """Override showEvent to ensure HUD fills the entire parent area."""
@@ -1029,10 +1071,10 @@ class HUDWidget(QWidget):
             parent_size = self.parent().size()
             self.setGeometry(0, 0, parent_size.width(), parent_size.height())
             self.resize(parent_size)
-            self.update()
+            self._do_update()  # Use throttled update
 
     def resizeEvent(self, event):
         """Override resizeEvent to handle size changes properly."""
         super().resizeEvent(event)
         # Force update when size changes
-        self.update()
+        self._do_update()  # Use throttled update

@@ -656,6 +656,9 @@ UAV kontrolleri normal çalışmaya devam edecek.
             # Connect resize event to update HUD size when label_2 is resized
             self.label_2.resizeEvent = self.on_hud_container_resize
             
+            # Force initial update to ensure HUD is rendered
+            self.hud_widget.force_update()
+            
             logger.info("HUD view setup completed")
             
         except Exception as e:
@@ -770,6 +773,9 @@ UAV kontrolleri normal çalışmaya devam edecek.
                 if initial_telemetry:
                     self.update_map_with_uav_data(initial_telemetry)
                     
+                # Update pasted.txt file if it exists
+                self.update_pasted_file("connected")
+                    
                 self.ihaInformer.append(f"📡 Telemetri verisi alınıyor...")
                 logger.info("Drone connection successful, telemetry started")
             else:
@@ -789,6 +795,9 @@ UAV kontrolleri normal çalışmaya devam edecek.
         update_rate = getattr(settings, 'TELEMETRY_UPDATE_RATE', 100)  # Default 100ms
         self.telemetry_timer.start(update_rate)
         logger.info(f"Telemetry timer started with {update_rate}ms interval")
+        
+        # Force an immediate update to show initial state
+        self.update_telemetry_display()
     
     def connect_dronekit(self, connection_string: str) -> bool:
         """Connect using DroneKit with improved error handling."""
@@ -872,6 +881,11 @@ UAV kontrolleri normal çalışmaya devam edecek.
                 self.telemetry_timer.stop()
                 logger.info("Telemetry timer stopped")
             
+            # Update HUD to show disconnected state
+            if hasattr(self, 'hud_widget') and self.hud_widget:
+                self.hud_widget.setConnectionState(False)
+                self.hud_widget.force_update()
+            
             # Close DroneKit connection
             if self.uav:
                 self.uav.close()
@@ -890,6 +904,10 @@ UAV kontrolleri normal çalışmaya devam edecek.
                 self.baglanti.setText("Bağlantı: 🔴 Kapalı")
             
             self.disable_flight_controls()
+            
+            # Update pasted.txt file if it exists
+            self.update_pasted_file("disconnected")
+            
             logger.info("Drone disconnected successfully")
             
         except Exception as e:
@@ -1070,6 +1088,9 @@ UAV kontrolleri normal çalışmaya devam edecek.
     def update_telemetry_display(self):
         """Update telemetry display."""
         if not self.connection_active:
+            # Even when not connected, update HUD to show disconnected state
+            if self.hud_widget:
+                self.hud_widget.setConnectionState(False)
             return
         
         try:
@@ -1083,6 +1104,16 @@ UAV kontrolleri normal çalışmaya devam edecek.
             if self.hud_widget:
                 self.hud_widget.updateData(telemetry)
                 self.hud_widget.setConnectionState(self.connection_active)
+                
+                # Debug: Log HUD update info occasionally
+                if hasattr(self, '_hud_update_counter'):
+                    self._hud_update_counter += 1
+                else:
+                    self._hud_update_counter = 1
+                    
+                if self._hud_update_counter % 50 == 0:  # Log every 50 updates
+                    debug_info = self.hud_widget.get_debug_info()
+                    logger.debug(f"HUD update #{self._hud_update_counter}: {debug_info}")
             
             # Update UI labels
             self.update_ui_labels(telemetry)
@@ -1099,6 +1130,9 @@ UAV kontrolleri normal çalışmaya devam edecek.
                 
         except Exception as e:
             logger.error(f"Telemetry update failed: {e}")
+            # Make sure HUD shows disconnected state on error
+            if self.hud_widget:
+                self.hud_widget.setConnectionState(False)
     
     def get_current_telemetry(self) -> Dict[str, Any]:
         """Get current telemetry data."""
@@ -1186,58 +1220,7 @@ UAV kontrolleri normal çalışmaya devam edecek.
         except Exception as e:
             logger.error(f"Failed to update map with UAV data: {e}")
     
-    def toggle_arm_disarm(self):
-        """Toggle arm/disarm state."""
-        if not self.connection_active:
-            if hasattr(self, 'ihaInformer'):
-                self.ihaInformer.append("İHA bağlı değil!")
-            return
-        
-        try:
-            success = False
-            current_armed = False
-            
-            # Get current armed state
-            if self.uav:
-                current_armed = self.uav.armed
-            elif self.mavlink_client:
-                telemetry = self.mavlink_client.get_telemetry_data()
-                current_armed = telemetry.get('armed', False) if telemetry else False
-            
-            # Toggle arm/disarm
-            if current_armed:
-                # Disarm
-                if self.uav:
-                    self.uav.armed = False
-                    success = True
-                    action = "Disarmed"
-                elif self.mavlink_client:
-                    success = self.mavlink_client.disarm()
-                    action = "Disarmed"
-            else:
-                # Arm
-                if self.uav:
-                    self.uav.armed = True
-                    success = True
-                    action = "Armed"
-                elif self.mavlink_client:
-                    success = self.mavlink_client.arm()
-                    action = "Armed"
-            
-            if hasattr(self, 'ihaInformer'):
-                if success:
-                    self.ihaInformer.append(f"İHA {action}")
-                    # Update button text
-                    if hasattr(self, 'armDisarm'):
-                        self.armDisarm.setText("DISARM" if not current_armed else "ARM")
-                else:
-                    self.ihaInformer.append(f"Arm/Disarm işlemi başarısız")
-                    
-        except Exception as e:
-            logger.error(f"Failed to toggle arm/disarm: {e}")
-            if hasattr(self, 'ihaInformer'):
-                self.ihaInformer.append(f"Arm/Disarm hatası: {str(e)}")
-    
+
     def update_ui_labels(self, telemetry: Dict[str, Any]):
         """Update UI labels with telemetry data."""
         try:
@@ -1317,7 +1300,7 @@ UAV kontrolleri normal çalışmaya devam edecek.
             self.hud_widget.setMinimumSize(container_size)
             self.hud_widget.setMaximumSize(container_size)
             self.hud_widget.raise_()  # Keep HUD on top
-            self.hud_widget.update()  # Force repaint
+            self.hud_widget.force_update()  # Force immediate repaint
         
         # Call the original resize event if it exists
         if hasattr(self.label_2.__class__, 'resizeEvent'):
@@ -1397,6 +1380,45 @@ UAV kontrolleri normal çalışmaya devam edecek.
             logger.error(f"Error closing antenna system: {e}")
             if hasattr(self, 'ihaInformer'):
                 self.ihaInformer.append(f"❌ Anten sistemi kapatma hatası: {str(e)}")
+    
+    def update_pasted_file(self, status: str):
+        """Update pasted.txt file with current status if it exists."""
+        try:
+            from pathlib import Path
+            import time
+            
+            # Check common locations for pasted.txt
+            possible_locations = [
+                settings.PROJECT_ROOT / "pasted.txt",
+                settings.PROJECT_ROOT / "data" / "pasted.txt",
+                settings.PROJECT_ROOT / "uav_project" / "pasted.txt",
+                settings.PROJECT_ROOT / "uav_project" / "data" / "pasted.txt",
+                settings.PROJECT_ROOT / "config" / "pasted.txt"
+            ]
+            
+            pasted_file = None
+            for location in possible_locations:
+                if location.exists():
+                    pasted_file = location
+                    break
+            
+            if pasted_file:
+                timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+                status_line = f"\n# Status update: {status} at {timestamp}"
+                
+                # Add HUD update info if available
+                if hasattr(self, 'hud_widget') and self.hud_widget:
+                    debug_info = self.hud_widget.get_debug_info()
+                    status_line += f"\n# HUD state: connected={debug_info['connected']}, visible={debug_info['visible']}, size={debug_info['size']}"
+                
+                with open(pasted_file, 'a', encoding='utf-8') as f:
+                    f.write(status_line)
+                
+                logger.debug(f"Updated pasted.txt with status: {status}")
+                
+        except Exception as e:
+            logger.debug(f"Could not update pasted.txt: {e}")
+            # Don't raise error - this is optional functionality
 
 
 def main():
