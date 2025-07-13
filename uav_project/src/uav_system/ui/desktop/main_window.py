@@ -1129,8 +1129,27 @@ UAV kontrolleri normal çalışmaya devam edecek.
             
             # Fallback to MAVLink
             elif self.mavlink_client:
-                telemetry = self.mavlink_client.get_telemetry_data()
-                if telemetry:
+                mavlink_data = self.mavlink_client.get_telemetry_data()
+                if mavlink_data:
+                    # Map MAVLink data to HUD-compatible format
+                    telemetry = {
+                        "lat": mavlink_data.get("lat", 0.0),
+                        "lon": mavlink_data.get("lon", 0.0),
+                        "altitude": mavlink_data.get("altitude", 0.0),
+                        "roll": math.degrees(mavlink_data.get("roll", 0.0)),
+                        "pitch": math.degrees(mavlink_data.get("pitch", 0.0)),
+                        "yaw": math.degrees(mavlink_data.get("yaw", 0.0)),
+                        "airspeed": mavlink_data.get("airspeed", 0.0),
+                        "groundspeed": mavlink_data.get("groundspeed", 0.0),
+                        "armed": mavlink_data.get("armed", False),
+                        "flightMode": mavlink_data.get("flight_mode", "UNKNOWN"),
+                        "batteryLevel": mavlink_data.get("battery_level", 0.0),
+                        "batteryVoltage": mavlink_data.get("battery_voltage", 0.0),
+                        "gpsStatus": mavlink_data.get("gps_fix", 0),
+                        "gpsSatellites": mavlink_data.get("satellites", 0),
+                        "throttle": mavlink_data.get("throttle", 0.0),
+                        "heading": mavlink_data.get("heading", 0.0),
+                    }
                     self.current_telemetry.update(telemetry)
                     
         except Exception as e:
@@ -1212,7 +1231,7 @@ UAV kontrolleri normal çalışmaya devam edecek.
                     success = True
                     action = "Disarmed"
                 elif self.mavlink_client:
-                    success = self.mavlink_client.disarm()
+                    success = self.mavlink_client.arm_disarm(False)
                     action = "Disarmed"
             else:
                 # Arm
@@ -1221,7 +1240,7 @@ UAV kontrolleri normal çalışmaya devam edecek.
                     success = True
                     action = "Armed"
                 elif self.mavlink_client:
-                    success = self.mavlink_client.arm()
+                    success = self.mavlink_client.arm_disarm(True)
                     action = "Armed"
             
             if hasattr(self, 'ihaInformer'):
