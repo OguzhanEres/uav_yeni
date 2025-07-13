@@ -1220,58 +1220,7 @@ UAV kontrolleri normal çalışmaya devam edecek.
         except Exception as e:
             logger.error(f"Failed to update map with UAV data: {e}")
     
-    def toggle_arm_disarm(self):
-        """Toggle arm/disarm state."""
-        if not self.connection_active:
-            if hasattr(self, 'ihaInformer'):
-                self.ihaInformer.append("İHA bağlı değil!")
-            return
-        
-        try:
-            success = False
-            current_armed = False
-            
-            # Get current armed state
-            if self.uav:
-                current_armed = self.uav.armed
-            elif self.mavlink_client:
-                telemetry = self.mavlink_client.get_telemetry_data()
-                current_armed = telemetry.get('armed', False) if telemetry else False
-            
-            # Toggle arm/disarm
-            if current_armed:
-                # Disarm
-                if self.uav:
-                    self.uav.armed = False
-                    success = True
-                    action = "Disarmed"
-                elif self.mavlink_client:
-                    success = self.mavlink_client.disarm()
-                    action = "Disarmed"
-            else:
-                # Arm
-                if self.uav:
-                    self.uav.armed = True
-                    success = True
-                    action = "Armed"
-                elif self.mavlink_client:
-                    success = self.mavlink_client.arm()
-                    action = "Armed"
-            
-            if hasattr(self, 'ihaInformer'):
-                if success:
-                    self.ihaInformer.append(f"İHA {action}")
-                    # Update button text
-                    if hasattr(self, 'armDisarm'):
-                        self.armDisarm.setText("DISARM" if not current_armed else "ARM")
-                else:
-                    self.ihaInformer.append(f"Arm/Disarm işlemi başarısız")
-                    
-        except Exception as e:
-            logger.error(f"Failed to toggle arm/disarm: {e}")
-            if hasattr(self, 'ihaInformer'):
-                self.ihaInformer.append(f"Arm/Disarm hatası: {str(e)}")
-    
+
     def update_ui_labels(self, telemetry: Dict[str, Any]):
         """Update UI labels with telemetry data."""
         try:
