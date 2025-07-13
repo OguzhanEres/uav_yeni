@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# For Windows, use: python "c:\path\to\main.py"
 """
 Hüma UAV Ground Control Station
 Main application entry point.

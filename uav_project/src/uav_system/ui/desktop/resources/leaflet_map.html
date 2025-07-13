@@ -17,15 +17,21 @@
                 crossorigin=""></script>
             
             <style>
-                body {
+                html, body {
                     margin: 0;
                     padding: 0;
+                    height: 100%;
+                    width: 100%;
                     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
                     overflow: hidden;
                 }
                 #map {
                     height: 100vh;
                     width: 100vw;
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    z-index: 1;
                 }
                 .custom-div-icon {
                     background: none;
@@ -335,7 +341,7 @@
                         
                         var marker = L.marker([lat, lon], {icon: waypointIcon})
                             .addTo(map)
-                            .bindPopup(`📍 ${name}<br>Lat: ${lat.toFixed(6)}<br>Lon: ${lon.toFixed(6)}`);
+                            .bindPopup(`📍 ${name}<br>Lat: ${lat.toFixed(6)}<br>Lon: ${lon.toFixed(6}`);
                         
                         waypoints[id] = marker;
                         console.log('Waypoint added:', id, name);

@@ -71,58 +71,95 @@ class LeafletOnlineMap(QWidget):
         """Setup the map user interface."""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)  # Remove all margins
-        layout.setSpacing(2)  # Minimal spacing between elements
+        layout.setSpacing(1)  # Minimal spacing between elements
         
-        # Control panel
+        # Control panel with reduced height
         control_layout = QHBoxLayout()
-        control_layout.setContentsMargins(5, 5, 5, 5)  # Small margins for controls only
+        control_layout.setContentsMargins(2, 2, 2, 2)  # Minimal margins for controls
         
-        # Map type buttons
-        self.btn_street = QPushButton("🗺️ Street")
+        # Map type buttons - smaller and more compact
+        self.btn_street = QPushButton("🗺️")
         self.btn_street.setCheckable(True)
         self.btn_street.setChecked(True)
+        self.btn_street.setMaximumSize(40, 25)
+        self.btn_street.setToolTip("Street Map")
         self.btn_street.clicked.connect(self.toggle_street_layer)
         control_layout.addWidget(self.btn_street)
         
-        self.btn_satellite = QPushButton("🛰️ Satellite")
+        self.btn_satellite = QPushButton("🛰️")
         self.btn_satellite.setCheckable(True)
+        self.btn_satellite.setMaximumSize(40, 25)
+        self.btn_satellite.setToolTip("Satellite View")
         self.btn_satellite.clicked.connect(self.toggle_satellite_layer)
         control_layout.addWidget(self.btn_satellite)
         
         # Flight path toggle
-        self.btn_flight_path = QPushButton("✈️ Flight Path")
+        self.btn_flight_path = QPushButton("✈️")
         self.btn_flight_path.setCheckable(True)
-        self.btn_flight_path.setChecked(False)  # Default to false - no flight path shown
+        self.btn_flight_path.setChecked(False)
+        self.btn_flight_path.setMaximumSize(40, 25)
+        self.btn_flight_path.setToolTip("Flight Path")
         self.btn_flight_path.clicked.connect(self.toggle_flight_path)
         control_layout.addWidget(self.btn_flight_path)
         
         # Clear track button
-        self.btn_clear_track = QPushButton("🗑️ Clear Track")
+        self.btn_clear_track = QPushButton("🗑️")
+        self.btn_clear_track.setMaximumSize(40, 25)
+        self.btn_clear_track.setToolTip("Clear Track")
         self.btn_clear_track.clicked.connect(self.clear_track)
         control_layout.addWidget(self.btn_clear_track)
         
         # Center on UAV button
-        self.btn_center_uav = QPushButton("🎯 Center UAV")
+        self.btn_center_uav = QPushButton("🎯")
+        self.btn_center_uav.setMaximumSize(40, 25)
+        self.btn_center_uav.setToolTip("Center on UAV")
         self.btn_center_uav.clicked.connect(self.center_on_uav)
         control_layout.addWidget(self.btn_center_uav)
         
         # Refresh button
-        self.btn_refresh = QPushButton("🔄 Refresh")
+        self.btn_refresh = QPushButton("🔄")
+        self.btn_refresh.setMaximumSize(40, 25)
+        self.btn_refresh.setToolTip("Refresh Map")
         self.btn_refresh.clicked.connect(self.force_refresh_map)
         control_layout.addWidget(self.btn_refresh)
         
         control_layout.addStretch()
         
-        # Coordinates display
-        self.lbl_coordinates = QLabel("📍 Lat: 0.000000, Lon: 0.000000")
-        self.lbl_coordinates.setStyleSheet("font-family: monospace; font-size: 12px;")
+        # Compact coordinates display
+        self.lbl_coordinates = QLabel("📍 0.0000, 0.0000")
+        self.lbl_coordinates.setStyleSheet("font-family: monospace; font-size: 10px; color: #ecf0f1;")
+        self.lbl_coordinates.setMaximumHeight(20)
         control_layout.addWidget(self.lbl_coordinates)
         
-        layout.addLayout(control_layout)
+        # Set maximum height for control panel
+        control_widget = QWidget()
+        control_widget.setLayout(control_layout)
+        control_widget.setMaximumHeight(30)
+        control_widget.setStyleSheet("""
+            QWidget { 
+                background: rgba(44, 62, 80, 0.8); 
+                border-radius: 3px; 
+            }
+            QPushButton { 
+                border: 1px solid #34495e; 
+                border-radius: 3px; 
+                background: #3498db;
+                color: white;
+                font-weight: bold;
+            }
+            QPushButton:checked { 
+                background: #e74c3c; 
+            }
+            QPushButton:hover { 
+                background: #2980b9; 
+            }
+        """)
         
-        # Web engine view for map
+        layout.addWidget(control_widget)
+        
+        # Web engine view for map - maximum space
         self.web_view = QWebEngineView()
-        self.web_view.setMinimumSize(400, 300)  # Reduced minimum size
+        self.web_view.setMinimumSize(600, 400)  # Increased minimum size
         self.web_view.setSizePolicy(self.web_view.sizePolicy().Expanding, self.web_view.sizePolicy().Expanding)
         
         # Add loading status label
@@ -142,7 +179,7 @@ class LeafletOnlineMap(QWidget):
         """)
         self.loading_label.setVisible(True)
         
-        # Configure web engine settings
+        # Configure web engine settings for better performance
         settings = self.web_view.settings()
         settings.setAttribute(QWebEngineSettings.JavascriptEnabled, True)
         settings.setAttribute(QWebEngineSettings.LocalContentCanAccessRemoteUrls, True)
@@ -150,6 +187,7 @@ class LeafletOnlineMap(QWidget):
         settings.setAttribute(QWebEngineSettings.ErrorPageEnabled, True)
         settings.setAttribute(QWebEngineSettings.PluginsEnabled, True)
         settings.setAttribute(QWebEngineSettings.AllowGeolocationOnInsecureOrigins, True)
+        settings.setAttribute(QWebEngineSettings.ShowScrollBars, False)  # Hide scrollbars
         
         # Create a stacked layout for web view and loading label
         self.map_stack = QStackedWidget()
@@ -163,6 +201,12 @@ class LeafletOnlineMap(QWidget):
         layout.addWidget(self.map_stack, 1)  # Give map maximum space (stretch factor 1)
         
         self.setLayout(layout)
+        
+        # Force proper size policies
+        from PyQt5.QtWidgets import QSizePolicy
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        
+        logger.info("Leaflet map UI setup completed")
     
     def setup_map(self):
         """Initialize the Leaflet-based online map."""
@@ -247,15 +291,21 @@ class LeafletOnlineMap(QWidget):
                 crossorigin=""></script>
             
             <style>
-                body {{
+                html, body {{
                     margin: 0;
                     padding: 0;
+                    height: 100%;
+                    width: 100%;
                     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
                     overflow: hidden;
                 }}
                 #map {{
                     height: 100vh;
                     width: 100vw;
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    z-index: 1;
                 }}
                 .custom-div-icon {{
                     background: none;
@@ -565,7 +615,7 @@ class LeafletOnlineMap(QWidget):
                         
                         var marker = L.marker([lat, lon], {{icon: waypointIcon}})
                             .addTo(map)
-                            .bindPopup(`📍 ${{name}}<br>Lat: ${{lat.toFixed(6)}}<br>Lon: ${{lon.toFixed(6)}}`);
+                            .bindPopup(`📍 ${{name}}<br>Lat: ${{lat.toFixed(6)}}<br>Lon: ${{lon.toFixed(6}}`);
                         
                         waypoints[id] = marker;
                         console.log('Waypoint added:', id, name);
@@ -662,11 +712,12 @@ class LeafletOnlineMap(QWidget):
             self.map_loaded = True
             logger.info("Leaflet map loaded successfully")
             
-            # Wait for JavaScript initialization
+            # Wait for JavaScript initialization and immediately switch to map
             def switch_to_map():
                 self.map_stack.setCurrentWidget(self.web_view)
-                # Force map resize after switching
-                self.web_view.page().runJavaScript("map.invalidateSize();")
+                # Force map resize and invalidation after switching
+                QTimer.singleShot(500, self.force_map_resize)
+                QTimer.singleShot(1000, self.force_map_resize)  # Extra resize after 1 second
                 logger.info("Switched to Leaflet map view")
                 self.map_ready.emit(True)
                 
@@ -677,12 +728,13 @@ class LeafletOnlineMap(QWidget):
                     self.on_js_check_complete
                 )
             
-            QTimer.singleShot(2000, check_js_functionality)
-            QTimer.singleShot(3000, switch_to_map)
+            # Immediate switch to reduce loading time
+            QTimer.singleShot(1000, check_js_functionality)
+            QTimer.singleShot(1500, switch_to_map)
             
         else:
             logger.error("Failed to load Leaflet map")
-            self.loading_label.setText("❌ Harita yükleme başarısız!\n\nİnternet bağlantısı gerekli\nWeb engine sorunu olabilir")
+            self.loading_label.setText("❌ Harita yükleniyor...")
             self.loading_label.setStyleSheet("""
                 QLabel {
                     background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
@@ -695,6 +747,21 @@ class LeafletOnlineMap(QWidget):
                 }
             """)
             self.map_ready.emit(False)
+    
+    def force_map_resize(self):
+        """Force map to resize and redraw properly."""
+        if self.map_loaded and self.web_view:
+            resize_js = """
+                if (typeof map !== 'undefined' && map) {
+                    setTimeout(function() {
+                        map.invalidateSize(true);
+                        map.getContainer().style.height = '100%';
+                        map.getContainer().style.width = '100%';
+                        console.log('Map resize triggered');
+                    }, 100);
+                }
+            """
+            self.web_view.page().runJavaScript(resize_js)
     
     def on_js_check_complete(self, result):
         """Handle JavaScript functionality check result."""
@@ -835,18 +902,34 @@ class LeafletOnlineMap(QWidget):
         except Exception as e:
             logger.error(f"Error setting map center: {e}")
     
+    @pyqtSlot()
     def force_refresh_map(self):
-        """Force refresh the map display."""
-        if self.map_loaded:
-            self.web_view.page().runJavaScript("forceResize();")
-            logger.info("Map refreshed and resized")
+        """Force refresh the entire map."""
+        if self.web_view and self.map_loaded:
+            # Reload the map page completely
+            self.map_loaded = False
+            self.map_stack.setCurrentWidget(self.loading_label)
+            self.loading_label.setText("🔄 Harita yenileniyor...")
+            
+            # Reload the page
+            QTimer.singleShot(500, lambda: self.web_view.reload())
+            logger.info("Map refresh initiated")
+        else:
+            logger.warning("Cannot refresh map - not loaded yet")
     
     def resizeEvent(self, event):
         """Handle widget resize events."""
         super().resizeEvent(event)
+        # Force map resize when widget is resized
         if self.map_loaded:
-            # Delay the resize to ensure widget is fully resized
-            QTimer.singleShot(100, lambda: self.web_view.page().runJavaScript("forceResize();"))
+            QTimer.singleShot(100, self.force_map_resize)
+    
+    def showEvent(self, event):
+        """Handle widget show events."""
+        super().showEvent(event)
+        # Force map resize when widget becomes visible
+        if self.map_loaded:
+            QTimer.singleShot(500, self.force_map_resize)
     
     def set_webengine_status(self, available: bool):
         """Set WebEngine availability status."""

@@ -13,21 +13,28 @@ A professional, modular UAV (Unmanned Aerial Vehicle) control and monitoring sys
 - **Camera System**: Real-time video streaming and processing
 - **Mission Planning**: Waypoint management and autonomous flight
 
-## Quick Start
+## 🚀 Quick Start
 
+### Windows Users
+The easiest way to run the application on Windows:
+```powershell
+# Double-click run_gcs.bat or run in PowerShell:
+.\run_gcs.bat
+
+# Or manually:
+python main.py
+```
+
+### Linux/Mac Users  
 ```bash
 # Install dependencies
 pip install -r requirements.txt
 
-# Configure environment
-cp .env.example .env
-
-# Run the Ground Control Station
-python -m src.uav_system.ui.desktop.main_window
-
-# Or run CLI interface
-python -m src.uav_system.ui.cli.main
+# Run the application  
+python3 main.py
 ```
+
+### Prerequisites
 
 ## Architecture
 
