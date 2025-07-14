@@ -13,7 +13,8 @@ import math
 class HUDWidget(QWidget):
     def __init__(self, parent=None):
         super(HUDWidget, self).__init__(parent)
-        
+        # Eğer eski updateData ve setConnectionState silindiyse, yeniden ekle:
+
         # Uçuş bilgileri
         self._roll = 0.0
         self._pitch = 0.0
@@ -75,7 +76,12 @@ class HUDWidget(QWidget):
         
         # Bağlantı durumu - telemetri verisinin gerçek olup olmadığını belirtir
         self._isConnected = False
-    
+    def updateData(self, data: dict):
+        super().updateData(data)
+
+    def setConnectionState(self, connected: bool):
+        super().setConnectionState(connected)
+        
     def update_flight_data(self, data: dict):
         """
         data içindeki alanları field_mapping üzerinden

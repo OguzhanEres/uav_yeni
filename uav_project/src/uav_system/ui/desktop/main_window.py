@@ -117,6 +117,17 @@ class HumaGCS(QMainWindow):
         # Communication
         self.mavlink_client = None
         
+        # Communication
+        self.mavlink_client = None
+
+        # ─── PlaneController örneğini oluştur ve sakla ───
+       # MAVLinkClient hazır olduktan sonra bunu yap:
+        from src.uav_system.flight_control.plane_controller import UAVPlane
+       # Burada mavlink_client ya da connection string ile init et
+        self.plane_controller = UAVPlane(vehicle=None, connection_string=None)
+        # Eğer mavlink_client kullanıyorsa, ayarlayın:
+        # self.plane_controller = UAVPlane(vehicle=None, connection_string=connection_string)
+
         # Initialize UI and systems
         self.setup_ui()
         self.setup_communication()
@@ -1126,6 +1137,7 @@ UAV kontrolleri normal çalışmaya devam edecek.
             
             # Update HUD if available
             if self.hud_widget:
+            # Yeni wrapper metotları
                 self.hud_widget.update_flight_data(telemetry)
                 self.hud_widget.set_connection_status(self.connection_active)
             

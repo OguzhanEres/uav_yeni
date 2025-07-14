@@ -426,7 +426,6 @@ class LeafletOnlineMap(QWidget):
                             weight: 3,
                             opacity: 0.8
                         }});
-                        // Do not add to map by default - user can enable it with the flight path button
                         
                         // Map event listeners
                         map.on('click', function(e) {{
@@ -464,7 +463,9 @@ class LeafletOnlineMap(QWidget):
                         function onResize() {{
                             console.log('Map resize triggered');
                             setTimeout(function() {{
-                                map.invalidateSize();
+                                if (map) {{
+                                    map.invalidateSize();
+                                }}
                             }}, 100);
                         }}
                         
@@ -517,35 +518,22 @@ class LeafletOnlineMap(QWidget):
                         
                         uavMarker = L.marker([lat, lon], {{icon: uavIcon}})
                             .addTo(map)
-                            .bindPopup(`🚁 UAV<br>Lat: ${{lat.toFixed(6)}}<br>Lon: ${{lon.toFixed(6)}}<br>Heading: ${{heading.toFixed(1)}}°`);
+                            .bindPopup('🚁 UAV<br>Lat: ' + lat.toFixed(6) + '<br>Lon: ' + lon.toFixed(6) + '<br>Heading: ' + heading.toFixed(1) + '°');
                         
-                        // Create heading line (burun yönelimi)
-                        var headingDistance = 0.001; // Yaklaşık 100 metre (coğrafi koordinatlarda)
-                        var headingRad = (heading * Math.PI) / 180; // Dereceyi radyana çevir
-                        
-                        // Heading yönünde nokta hesapla (kuzey = 0°, saat yönü pozitif)
+                        // Create heading line
+                        var headingDistance = 0.001;
+                        var headingRad = (heading * Math.PI) / 180;
                         var headingEndLat = lat + (headingDistance * Math.cos(headingRad));
                         var headingEndLon = lon + (headingDistance * Math.sin(headingRad));
                         
-                        // Heading çizgisini oluştur
                         headingLine = L.polyline([
                             [lat, lon],
                             [headingEndLat, headingEndLon]
                         ], {{
-                            color: '#ff6b35',  // Turuncu renk
+                            color: '#ff6b35',
                             weight: 4,
                             opacity: 0.9
                         }}).addTo(map);
-                        
-                        // Heading çizgisinin ucuna ok işareti ekle
-                        var arrowIcon = L.divIcon({{
-                            className: 'heading-arrow',
-                            html: '<div style="width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-bottom: 12px solid #ff6b35; transform: rotate(' + heading + 'deg);"></div>',
-                            iconSize: [12, 12],
-                            iconAnchor: [6, 6]
-                        }});
-                        
-                        headingArrow = L.marker([headingEndLat, headingEndLon], {{icon: arrowIcon}}).addTo(map);
                         
                         // Add to flight path
                         flightPath.push([lat, lon]);
@@ -561,7 +549,7 @@ class LeafletOnlineMap(QWidget):
                         // Update status
                         var statusElement = document.getElementById('uavStatus');
                         if (statusElement) {{
-                            statusElement.textContent = `${{lat.toFixed(4)}}, ${{lon.toFixed(4)}}`;
+                            statusElement.textContent = lat.toFixed(4) + ', ' + lon.toFixed(4);
                         }}
                         
                     }} catch (error) {{
@@ -615,7 +603,7 @@ class LeafletOnlineMap(QWidget):
                         
                         var marker = L.marker([lat, lon], {{icon: waypointIcon}})
                             .addTo(map)
-                            .bindPopup(`📍 ${{name}}<br>Lat: ${{lat.toFixed(6)}}<br>Lon: ${{lon.toFixed(6}}`);
+                            .bindPopup('📍 ' + name + '<br>Lat: ' + lat.toFixed(6) + '<br>Lon: ' + lon.toFixed(6));
                         
                         waypoints[id] = marker;
                         console.log('Waypoint added:', id, name);
@@ -658,40 +646,66 @@ class LeafletOnlineMap(QWidget):
                 }};
                 
                 window.toggleSatelliteLayer = function() {{
-                    if (currentLayer === 'street') {{
-                        map.removeLayer(streetLayer);
-                        satelliteLayer.addTo(map);
-                        currentLayer = 'satellite';
-                        console.log('Switched to satellite layer');
-                    }} else {{
-                        map.removeLayer(satelliteLayer);
-                        streetLayer.addTo(map);
-                        currentLayer = 'street';
-                        console.log('Switched to street layer');
+                    try {{
+                        if (!map) {{
+                            console.log('Map not initialized yet');
+                            return;
+                        }}
+                        if (currentLayer === 'street') {{
+                            map.removeLayer(streetLayer);
+                            satelliteLayer.addTo(map);
+                            currentLayer = 'satellite';
+                            console.log('Switched to satellite layer');
+                        }} else {{
+                            map.removeLayer(satelliteLayer);
+                            streetLayer.addTo(map);
+                            currentLayer = 'street';
+                            console.log('Switched to street layer');
+                        }}
+                    }} catch (error) {{
+                        console.error('Error toggling satellite layer:', error);
                     }}
                 }};
                 
                 window.toggleFlightPath = function(show) {{
-                    if (show) {{
-                        flightPolyline.addTo(map);
-                    }} else {{
-                        map.removeLayer(flightPolyline);
+                    try {{
+                        if (!map) {{
+                            console.log('Map not initialized yet');
+                            return;
+                        }}
+                        if (show) {{
+                            flightPolyline.addTo(map);
+                        }} else {{
+                            map.removeLayer(flightPolyline);
+                        }}
+                    }} catch (error) {{
+                        console.error('Error toggling flight path:', error);
                     }}
                 }};
                 
                 // Force map resize
                 window.forceResize = function() {{
-                    setTimeout(function() {{
-                        map.invalidateSize();
-                        console.log('Map size invalidated');
-                    }}, 100);
+                    try {{
+                        if (map) {{
+                            setTimeout(function() {{
+                                map.invalidateSize();
+                                console.log('Map size invalidated');
+                            }}, 100);
+                        }}
+                    }} catch (error) {{
+                        console.error('Error forcing resize:', error);
+                    }}
                 }};
                 
-                // Add some test data after initialization
+                // Add test data after initialization
                 setTimeout(function() {{
-                    if (typeof updateUAVPosition === 'function') {{
-                        updateUAVPosition({self.current_lat}, {self.current_lon}, 45);
-                        addWaypoint({self.current_lat + 0.001}, {self.current_lon + 0.001}, 'Test Waypoint', 'test_wp_1');
+                    try {{
+                        if (typeof updateUAVPosition === 'function') {{
+                            updateUAVPosition({self.current_lat}, {self.current_lon}, 45);
+                            addWaypoint({self.current_lat + 0.001}, {self.current_lon + 0.001}, 'Test Waypoint', 'test_wp_1');
+                        }}
+                    }} catch (error) {{
+                        console.error('Error adding test data:', error);
                     }}
                 }}, 2000);
                 
@@ -707,7 +721,7 @@ class LeafletOnlineMap(QWidget):
         # Stop the timeout timer
         if hasattr(self, 'load_timeout'):
             self.load_timeout.stop()
-            
+        
         if success:
             self.map_loaded = True
             logger.info("Leaflet map loaded successfully")
@@ -720,7 +734,7 @@ class LeafletOnlineMap(QWidget):
                 QTimer.singleShot(1000, self.force_map_resize)  # Extra resize after 1 second
                 logger.info("Switched to Leaflet map view")
                 self.map_ready.emit(True)
-                
+            
             # Check if JavaScript is working
             def check_js_functionality():
                 self.web_view.page().runJavaScript(
@@ -752,13 +766,17 @@ class LeafletOnlineMap(QWidget):
         """Force map to resize and redraw properly."""
         if self.map_loaded and self.web_view:
             resize_js = """
-                if (typeof map !== 'undefined' && map) {
-                    setTimeout(function() {
-                        map.invalidateSize(true);
-                        map.getContainer().style.height = '100%';
-                        map.getContainer().style.width = '100%';
-                        console.log('Map resize triggered');
-                    }, 100);
+                try {
+                    if (typeof map !== 'undefined' && map) {
+                        setTimeout(function() {
+                            map.invalidateSize(true);
+                            map.getContainer().style.height = '100%';
+                            map.getContainer().style.width = '100%';
+                            console.log('Map resize triggered');
+                        }, 100);
+                    }
+                } catch (error) {
+                    console.error('Error in force resize:', error);
                 }
             """
             self.web_view.page().runJavaScript(resize_js)
@@ -910,7 +928,6 @@ class LeafletOnlineMap(QWidget):
             self.map_loaded = False
             self.map_stack.setCurrentWidget(self.loading_label)
             self.loading_label.setText("🔄 Harita yenileniyor...")
-            
             # Reload the page
             QTimer.singleShot(500, lambda: self.web_view.reload())
             logger.info("Map refresh initiated")

@@ -16,9 +16,9 @@ from threading import Timer
 import numpy as np
 import psutil
 
-from core.logging_config import get_logger
-from core.base_classes import BaseModule
-from core.exceptions import ConnectionError, UAVException
+from ...core.logging_config import get_logger
+from ...core.base_classes import BaseModule
+from ...core.exceptions import ConnectionError, UAVException
 
 logger = get_logger(__name__)
 
