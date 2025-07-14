@@ -76,15 +76,20 @@ class HUDWidget(QWidget):
         # Bağlantı durumu - telemetri verisinin gerçek olup olmadığını belirtir
         self._isConnected = False
     
-    def setConnectionState(self, connected):
-        """Bağlantı durumunu ayarla"""
-        self._isConnected = connected
-        self.update()  # HUD görüntüsünü yenile
+    def update_flight_data(self, data: dict):
+        """
+        data içindeki alanları field_mapping üzerinden
+        HUD’in internal _data sözlüğüne map’ler ve updateData()’yı çağırır.
+        """
+        mapped = {}
+        for src, dst in self.field_mapping.items():
+            if src in data:
+                mapped[dst] = data[src]        
+                super().updateData(mapped)
 
-    def updateData(self, data: dict):
-        """Dışarıdan gelen telemetri verilerini al ve yeniden çiz."""
-        self._data.update(data)
-        self.update()
+    def set_connection_status(self, connected: bool):
+        """Bağlantı durumunu HUD’e bildirir."""
+        super().setConnectionState(connected)
         
     def paintEvent(self, event):
         # Get widget dimensions

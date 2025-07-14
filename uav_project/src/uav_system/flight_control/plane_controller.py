@@ -16,16 +16,43 @@ from threading import Timer
 import numpy as np
 import psutil
 
-from ...core.logging_config import get_logger
-from ...core.base_classes import BaseModule
-from ...core.exceptions import ConnectionError, UAVException
+from core.logging_config import get_logger
+from core.base_classes import BaseModule
+from core.exceptions import ConnectionError, UAVException
 
 logger = get_logger(__name__)
 
 # Global team number
 TEAM_NUMBER = 1
 
+import math
+import time
+from pymavlink import mavutil
 
+class WaypointNavigator:
+    def __init__(self, waypoints, threshold=5.0):
+        self.waypoints = waypoints
+        self.threshold = threshold
+        self.current_index = 0
+
+    def distance(self, p1, p2):
+        return math.sqrt((p1[0] - p2[0])**2 +
+                         (p1[1] - p2[1])**2 +
+                         (p1[2] - p2[2])**2)
+
+    def update(self, current_pos):
+        if self.current_index >= len(self.waypoints):
+            return None
+        target = self.waypoints[self.current_index]
+        dist = self.distance(current_pos, target)
+        # overshoot veya threshold’a ulaşıldıysa bir sonrakine geç
+        if dist <= self.threshold or getattr(self, 'prev_dist', None) and dist > self.prev_dist:
+            self.current_index += 1
+            if self.current_index >= len(self.waypoints):
+                return None
+            target = self.waypoints[self.current_index]
+        self.prev_dist = dist
+        return target
 class UAVPlane(BaseModule):
     """
     Modern UAV Plane controller with improved error handling and architecture.
@@ -578,3 +605,35 @@ class UAVPlane(BaseModule):
             self.disconnect()
         except:
             pass
+    
+    def fly_waypoints(self, waypoints, threshold=5.0):
+        """
+        Gerçek-zamanlı olarak waypoint’leri sırasıyla gönderir.
+        """
+        nav = WaypointNavigator(waypoints, threshold)
+        while True:
+            # 1) pozisyon & irtifa al
+            lat, lon = self.get_location()
+            telem = self.get_telemetry_data()
+            alt = telem.get("altitude", 0.0)
+
+            # 2) bir sonraki hedefi al
+            tgt = nav.update((lat, lon, alt))
+            if tgt is None:
+                return True
+            tgt_lat, tgt_lon, tgt_alt = tgt
+
+            # 3) gönder
+            ok = self.send_mission_item(
+                seq=nav.current_index - 1,
+                frame=mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT,
+                command=mavutil.mavlink.MAV_CMD_NAV_WAYPOINT,
+                current=0, autocontinue=1,
+                param1=0, param2=0, param3=0, param4=0,
+                x=tgt_lat, y=tgt_lon, z=tgt_alt
+            )
+            if not ok:
+                return False
+
+            # 5) küçük bekleme, gerçek-zamanlılık için non-blocking
+            time.sleep(0.1)

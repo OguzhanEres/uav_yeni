@@ -689,12 +689,12 @@ UAV kontrolleri normal çalışmaya devam edecek.
             if hasattr(self, 'kameraAc'):
                 self.kameraAc.clicked.connect(self.open_camera_window)
             
-            if hasattr(self, 'komut_secim'):
-                # ComboBox’a iki seçenek ekle
-                self.komut_secim.addItem("Otonom Kalkış")
-                self.komut_secim.addItem("Otonom İniş")
-                # Seçim değiştiğinde tetiklenecek metodu bağla
-                self.komut_secim.activated[str].connect(self.on_command_selected)
+            if hasattr(self, 'komut_Secim'):
+                self.komut_Secim.addItem("Otonom Kalkış")
+                self.komut_Secim.addItem("Otonom İniş")
+                self.komut_Secim.addItem("Otonom Uçuş")
+            if hasattr(self, 'komut_Onay'):
+                self.komut_Onay.clicked.connect(self.on_komut_Onay_clicked)
             
              # ─── Komut Onay butonu için handler bağlama ───
             if hasattr(self, 'komut_Onay'):
@@ -707,31 +707,38 @@ UAV kontrolleri normal çalışmaya devam edecek.
         
         
     def on_komut_Onay_clicked(self):
-        text = self.komut_Secim.currentText()
+        cmd = self.komut_Secim.currentText()
         try:
-            if text == "Otonom Kalkış":
-                altitude = 10.0
-                success = self.plane_controller.takeoff(altitude)
+            if cmd == "Otonom Kalkış":
+                ok = self.plane_controller.takeoff(10.0)
                 self.ihaInformer.append(
-                    f"Otonom kalkış ({altitude} m) komutu gönderildi." if success
-                    else "Otonom kalkış komutu başarısız.")
-            elif text == "Otonom İniş":
-                lat, lon = self.plane_controller.get_location()
-                cruise_alt = 20.0
-                success = self.plane_controller.land(
-                    lon=lon, lat=lat,
-                    current_alt=cruise_alt, cruise_alt=cruise_alt
+                "Otonom kalkış başarılı." if ok else "Otonom kalkış başarısız."
                 )
+
+            elif cmd == "Otonom İniş":
+                lat, lon = self.plane_controller.get_location()
+                ok = self.plane_controller.land(
+                    lon=lon, lat=lat,
+                    current_alt=20.0, cruise_alt=20.0
+                    )
                 self.ihaInformer.append(
-                    "Otonom iniş komutu gönderildi." if success
-                    else "Otonom iniş komutu başarısız.")
-            else:
-                # Diğer modlar (örneğin “Manuel” vb.) için ek mantık
-                pass
+                    "Otonom iniş başarılı." if ok else "Otonom iniş başarısız."
+                    )
+
+            elif cmd == "Otonom Uçuş":
+                wps = [
+                    (40.12345, 29.01234, 10.0),
+                    (40.12400, 29.01300, 15.0),
+                    (40.12500, 29.01400, 20.0),
+                ]
+                ok = self.plane_controller.fly_waypoints(wps, threshold=5.0)
+                self.ihaInformer.append(
+                    "Otonom uçuş tamamlandı." if ok else "Otonom uçuş sırasında hata."
+                    )
         except Exception as e:
             logger.error(f"Komut onayı hatası: {e}")
             self.ihaInformer.append(f"Hata: {e}")
-            
+
     def setup_timers(self):
         """Setup update timers."""
         try:
@@ -1119,12 +1126,8 @@ UAV kontrolleri normal çalışmaya devam edecek.
             
             # Update HUD if available
             if self.hud_widget:
-                # Yeni metodu kullanarak doğru alanları map’le ve HUD’i güncelle
                 self.hud_widget.update_flight_data(telemetry)
-                # Bağlantı durumunu da uyumlu isimle ayarla
                 self.hud_widget.set_connection_status(self.connection_active)
-                # Update UI labels
-                self.update_ui_labels(telemetry)
             
             # Update map with UAV data - use the new method
             self.update_map_with_uav_data({
