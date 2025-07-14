@@ -689,11 +689,49 @@ UAV kontrolleri normal çalışmaya devam edecek.
             if hasattr(self, 'kameraAc'):
                 self.kameraAc.clicked.connect(self.open_camera_window)
             
+            if hasattr(self, 'komut_secim'):
+                # ComboBox’a iki seçenek ekle
+                self.komut_secim.addItem("Otonom Kalkış")
+                self.komut_secim.addItem("Otonom İniş")
+                # Seçim değiştiğinde tetiklenecek metodu bağla
+                self.komut_secim.activated[str].connect(self.on_command_selected)
+            
+             # ─── Komut Onay butonu için handler bağlama ───
+            if hasattr(self, 'komut_Onay'):
+                self.komut_Onay.clicked.connect(self.on_komut_Onay_clicked)
+            
             logger.info("UI connections setup completed")
             
         except Exception as e:
             logger.error(f"Failed to setup UI connections: {e}")
-    
+        
+        
+    def on_komut_Onay_clicked(self):
+        text = self.komut_Secim.currentText()
+        try:
+            if text == "Otonom Kalkış":
+                altitude = 10.0
+                success = self.plane_controller.takeoff(altitude)
+                self.ihaInformer.append(
+                    f"Otonom kalkış ({altitude} m) komutu gönderildi." if success
+                    else "Otonom kalkış komutu başarısız.")
+            elif text == "Otonom İniş":
+                lat, lon = self.plane_controller.get_location()
+                cruise_alt = 20.0
+                success = self.plane_controller.land(
+                    lon=lon, lat=lat,
+                    current_alt=cruise_alt, cruise_alt=cruise_alt
+                )
+                self.ihaInformer.append(
+                    "Otonom iniş komutu gönderildi." if success
+                    else "Otonom iniş komutu başarısız.")
+            else:
+                # Diğer modlar (örneğin “Manuel” vb.) için ek mantık
+                pass
+        except Exception as e:
+            logger.error(f"Komut onayı hatası: {e}")
+            self.ihaInformer.append(f"Hata: {e}")
+            
     def setup_timers(self):
         """Setup update timers."""
         try:
@@ -1081,11 +1119,12 @@ UAV kontrolleri normal çalışmaya devam edecek.
             
             # Update HUD if available
             if self.hud_widget:
-                self.hud_widget.updateData(telemetry)
-                self.hud_widget.setConnectionState(self.connection_active)
-            
-            # Update UI labels
-            self.update_ui_labels(telemetry)
+                # Yeni metodu kullanarak doğru alanları map’le ve HUD’i güncelle
+                self.hud_widget.update_flight_data(telemetry)
+                # Bağlantı durumunu da uyumlu isimle ayarla
+                self.hud_widget.set_connection_status(self.connection_active)
+                # Update UI labels
+                self.update_ui_labels(telemetry)
             
             # Update map with UAV data - use the new method
             self.update_map_with_uav_data({
@@ -1192,51 +1231,36 @@ UAV kontrolleri normal çalışmaya devam edecek.
             if hasattr(self, 'ihaInformer'):
                 self.ihaInformer.append("İHA bağlı değil!")
             return
-        
         try:
-            success = False
-            current_armed = False
-            
-            # Get current armed state
+           # DroneKit varsa önce onu kullan
             if self.uav:
-                current_armed = self.uav.armed
+                current = self.uav.armed
+                self.uav.armed = not current
+                success = True
+                action = "ARM" if not current else "DISARM"
+
+            # MAVLink fallback
             elif self.mavlink_client:
-                telemetry = self.mavlink_client.get_telemetry_data()
-                current_armed = telemetry.get('armed', False) if telemetry else False
-            
-            # Toggle arm/disarm
-            if current_armed:
-                # Disarm
-                if self.uav:
-                    self.uav.armed = False
-                    success = True
-                    action = "Disarmed"
-                elif self.mavlink_client:
-                    success = self.mavlink_client.disarm()
-                    action = "Disarmed"
-            else:
-                # Arm
-                if self.uav:
-                    self.uav.armed = True
-                    success = True
-                    action = "Armed"
-                elif self.mavlink_client:
-                    success = self.mavlink_client.arm()
-                    action = "Armed"
-            
+                tel = self.mavlink_client.get_telemetry_data()
+                current = tel.get("armed", False)
+                success = self.mavlink_client.arm_disarm(not current)
+                action = "ARM" if not current else "DISARM"
+
+           # Kullanıcıya bilgi
             if hasattr(self, 'ihaInformer'):
                 if success:
-                    self.ihaInformer.append(f"İHA {action}")
-                    # Update button text
+                    self.ihaInformer.append(f"İHA {action} komutu gönderildi.")
+                    # Düğme metnini de güncelle
                     if hasattr(self, 'armDisarm'):
-                        self.armDisarm.setText("DISARM" if not current_armed else "ARM")
+                       self.armDisarm.setText("DISARM" if not current else "ARM")
                 else:
-                    self.ihaInformer.append(f"Arm/Disarm işlemi başarısız")
-                    
+                    self.ihaInformer.append("Arm/Disarm işlemi başarısız.")
+
         except Exception as e:
-            logger.error(f"Failed to toggle arm/disarm: {e}")
+            import logging
+            logging.error(f"Arm/Disarm hatası: {e}")
             if hasattr(self, 'ihaInformer'):
-                self.ihaInformer.append(f"Arm/Disarm hatası: {str(e)}")
+                self.ihaInformer.append(f"Arm/Disarm hatası: {e}")
     
     def update_ui_labels(self, telemetry: Dict[str, Any]):
         """Update UI labels with telemetry data."""
