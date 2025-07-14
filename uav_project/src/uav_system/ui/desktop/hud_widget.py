@@ -14,7 +14,9 @@ class HUDWidget(QWidget):
     def __init__(self, parent=None):
         super(HUDWidget, self).__init__(parent)
         # Eğer eski updateData ve setConnectionState silindiyse, yeniden ekle:
-
+        self.roll_value = 0.0
+        self.pitch_value = 0.0
+        self.yaw_value = 0.0
         # Uçuş bilgileri
         self._roll = 0.0
         self._pitch = 0.0
@@ -48,7 +50,7 @@ class HUDWidget(QWidget):
         self._textColor = QColor(255, 255, 255)     # Beyaz metin rengi
         
         # Bu widget'ın arka planını koyu lacivert yap
-        self.setStyleSheet("background-color: rgb(10, 10, 20);")
+        self.setStyleSheet("background-color: rgb(10, 10, 20); border: 2px solid red;")
         
         # Size policy'yi ayarlayarak widget'ın parent'ı tamamen doldurmasını sağla
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -104,17 +106,40 @@ class HUDWidget(QWidget):
         data içindeki alanları field_mapping üzerinden
         HUD’in internal _data sözlüğüne map’ler ve updateData()’yı çağırır.
         """
+        field_mapping = {
+            'roll': 'roll',
+            'pitch': 'pitch', 
+            'yaw': 'yaw',
+            'airspeed': 'airspeed',
+            'groundspeed': 'groundspeed',
+            'altitude': 'altitude',
+            'throttle': 'throttle',
+            'batteryLevel': 'batteryLevel',
+            'batteryVoltage': 'batteryVoltage',
+            'batteryCurrent': 'batteryCurrent',
+            'armed': 'armed',
+            'armable': 'armable',
+            'flightMode': 'flightMode',
+            'gpsStatus': 'gpsStatus',
+            'gpsSatellites': 'gpsSatellites',
+            'waypointDist': 'waypointDist',
+            'targetBearing': 'targetBearing'
+        }
+        
         mapped = {}
-        for src, dst in self.field_mapping.items():
+        for src, dst in field_mapping.items():
             if src in data:
                 mapped[dst] = data[src]        
-                super().updateData(mapped)
+        self.updateData(mapped)
 
     def set_connection_status(self, connected: bool):
         """Bağlantı durumunu HUD’e bildirir."""
-        super().setConnectionState(connected)
+        self.setConnectionState(connected)
         
     def paintEvent(self, event):
+        # Debug: HUD çizimi başlıyor
+        print(f"HUD paintEvent called - size: {self.width()}x{self.height()}")
+        
         # Get widget dimensions
         w = self.width()
         h = self.height()
@@ -1064,3 +1089,36 @@ class HUDWidget(QWidget):
         super().resizeEvent(event)
         # Force update when size changes
         self.update()
+    def update_attitude(self, roll: float, pitch: float, yaw: float):
+        """
+        Arayüzdeki Roll/Pitch/Yaw göstergesini güncelle.
+        """
+        # eğer QML veya Canvas kullanıyorsanız:
+        self.roll_value = roll
+        self.pitch_value = pitch
+        self.yaw_value = yaw
+        # Value değişti, yeniden çiz
+        self.update()          # QWidget subclass için
+        # veya QQuickItem için:
+        # self.setProperty('roll', roll); vb.
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        center_x = self.width()  // 2
+        center_y = self.height() // 2
+
+        # 1) Pitch kaydırma + Roll dönüşü
+        painter.save()
+        painter.translate(center_x, center_y + self.pitch_value * 2)  # ölçeği ayarla
+        painter.rotate(-self.roll_value)
+        # gök/yer çizimini burada yap
+        # e.g. painter.fillRect(...), painter.drawLine(...), vs.
+        painter.restore()
+
+        # 2) Heading oku için Yaw dönüşü
+        painter.save()
+        painter.translate(center_x, center_y)
+        painter.rotate(self.yaw_value)
+        # başlık oku çizimi
+        # e.g. painter.drawPolygon(...)
+        painter.restore()

@@ -30,11 +30,18 @@ from PyQt5 import QtCore, uic
 from PyQt5.QtGui import QDesktopServices
 from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEngineSettings, QWebEngineProfile
 
+
+from uav_system.ui.desktop.hud_widget import HUDWidget
+
+
+
 # Internal imports
 from uav_system.core.logging_config import get_logger
 from uav_system.core.exceptions import ConnectionError, UAVException
 from uav_system.communication.mavlink.mavlink_client import MAVLinkClient
 # Import settings from config module at the project root
+
+from src.uav_system.flight_control.plane_controller import UAVPlane
 import sys
 from pathlib import Path
 project_root = Path(__file__).parent.parent.parent.parent.parent
@@ -79,7 +86,6 @@ class HumaGCS(QMainWindow):
     
     def __init__(self):
         super().__init__()
-        
         # Initialize core attributes
         self.uav = None
         self.connection_active = False
@@ -121,12 +127,9 @@ class HumaGCS(QMainWindow):
         self.mavlink_client = None
 
         # ─── PlaneController örneğini oluştur ve sakla ───
-       # MAVLinkClient hazır olduktan sonra bunu yap:
+        # PlaneController will be initialized after connection is established
         from src.uav_system.flight_control.plane_controller import UAVPlane
-       # Burada mavlink_client ya da connection string ile init et
-        self.plane_controller = UAVPlane(vehicle=None, connection_string=None)
-        # Eğer mavlink_client kullanıyorsa, ayarlayın:
-        # self.plane_controller = UAVPlane(vehicle=None, connection_string=connection_string)
+        self.plane_controller = None
 
         # Initialize UI and systems
         self.setup_ui()
@@ -629,51 +632,66 @@ UAV kontrolleri normal çalışmaya devam edecek.
         else:
             logger.warning("Offline map failed to load, showing fallback")
             self.show_simple_map_fallback()
-    
     def setup_hud_view(self):
         """Setup the HUD (Heads-Up Display) component."""
-        if not hasattr(self, 'label_2') or not HUDWidget:
+        if not HUDWidget:
             logger.warning("HUD widget not available")
             return
-        
+            
         try:
-            # Create HUD widget with label_2 as parent
-            self.hud_widget = HUDWidget(self.label_2)
+            # Create HUD widget as a floating overlay on the main window
+            self.hud_widget = HUDWidget(self)
             
-            # Configure HUD to completely fill label_2
-            self.hud_widget.setGeometry(0, 0, self.label_2.width(), self.label_2.height())
-            self.hud_widget.resize(self.label_2.size())
+            # Set HUD to a fixed size and position (top-right corner)
+            hud_width = 400
+            hud_height = 300
+            hud_x = self.width() - hud_width - 20  # 20px margin from right
+            hud_y = 20  # 20px margin from top
             
-            # Set size policies to ensure HUD expands to fill the entire space
+            self.hud_widget.setGeometry(hud_x, hud_y, hud_width, hud_height)
+            self.hud_widget.setFixedSize(hud_width, hud_height)
+            
+            # Give HUD a visible background for debugging
+            self.hud_widget.setStyleSheet("""
+                background-color: rgba(0, 50, 100, 180);
+                border: 2px solid lime;
+            """)
+            
+            # Set minimum and maximum size policies
             from PyQt5.QtWidgets import QSizePolicy
-            self.hud_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-            self.hud_widget.setMinimumSize(self.label_2.size())
-            self.hud_widget.setMaximumSize(self.label_2.size())
+            self.hud_widget.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+            self.hud_widget.setMinimumSize(hud_width, hud_height)
             
-            # Clear label content and make it transparent
-            self.label_2.setText("")
-            self.label_2.setStyleSheet("border: none; background: transparent;")
-            
-            # Make sure label_2 also expands properly
-            self.label_2.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-            
-            # Show HUD and bring to front
+            # Make HUD visible and bring to front
+            self.hud_widget.setVisible(True)
             self.hud_widget.show()
             self.hud_widget.raise_()
             
             # Set initial connection state
             self.hud_widget.setConnectionState(False)
             
-            # Connect resize event to update HUD size when label_2 is resized
-            self.label_2.resizeEvent = self.on_hud_container_resize
+            # Force initial update
+            self.hud_widget.update()
+            self.hud_widget.repaint()
             
+            logger.info(f"HUD widget created as overlay - size: {hud_width}x{hud_height} at position ({hud_x}, {hud_y})")
             logger.info("HUD view setup completed")
             
         except Exception as e:
             logger.error(f"HUD setup failed: {e}")
-            if hasattr(self, 'label_2'):
-                self.label_2.setText(f"HUD yüklenemedi: {str(e)}")
-                self.label_2.setStyleSheet("color: red; font-size: 12pt;")
+    
+    def resizeEvent(self, event):
+        """Handle window resize and reposition HUD widget."""
+        super().resizeEvent(event)
+        
+        if hasattr(self, 'hud_widget') and self.hud_widget:
+            # Reposition HUD to top-right corner
+            hud_width = 400
+            hud_height = 300
+            hud_x = self.width() - hud_width - 20
+            hud_y = 20
+            
+            self.hud_widget.setGeometry(hud_x, hud_y, hud_width, hud_height)
     
     def setup_ui_connections(self):
         """Setup UI button connections and signals."""
@@ -718,23 +736,23 @@ UAV kontrolleri normal çalışmaya devam edecek.
         
         
     def on_komut_Onay_clicked(self):
+        """Handle Exec button for selected autonomous task."""
         cmd = self.komut_Secim.currentText()
+        
+        # Check if plane controller is available
+        if self.plane_controller is None:
+            self.ihaInformer.append("❌ İHA bağlantısı yok - önce bağlanın")
+            return
+            
         try:
             if cmd == "Otonom Kalkış":
                 ok = self.plane_controller.takeoff(10.0)
-                self.ihaInformer.append(
-                "Otonom kalkış başarılı." if ok else "Otonom kalkış başarısız."
-                )
+                self.ihaInformer.append("Kalkış " + ("✅" if ok else "❌"))
 
             elif cmd == "Otonom İniş":
-                lat, lon = self.plane_controller.get_location()
-                ok = self.plane_controller.land(
-                    lon=lon, lat=lat,
-                    current_alt=20.0, cruise_alt=20.0
-                    )
-                self.ihaInformer.append(
-                    "Otonom iniş başarılı." if ok else "Otonom iniş başarısız."
-                    )
+                # land() imzası lon/lat kabul etmiyor: sadece çağır
+                ok = self.plane_controller.land()
+                self.ihaInformer.append("İniş " + ("✅" if ok else "❌"))
 
             elif cmd == "Otonom Uçuş":
                 wps = [
@@ -743,12 +761,12 @@ UAV kontrolleri normal çalışmaya devam edecek.
                     (40.12500, 29.01400, 20.0),
                 ]
                 ok = self.plane_controller.fly_waypoints(wps, threshold=5.0)
-                self.ihaInformer.append(
-                    "Otonom uçuş tamamlandı." if ok else "Otonom uçuş sırasında hata."
-                    )
+                self.ihaInformer.append("Uçuş " + ("✅ tamamlandı" if ok else "❌ hata"))
+
         except Exception as e:
             logger.error(f"Komut onayı hatası: {e}")
-            self.ihaInformer.append(f"Hata: {e}")
+            self.ihaInformer.append(f"❌ Hata: {e}")
+
 
     def setup_timers(self):
         """Setup update timers."""
@@ -810,7 +828,11 @@ UAV kontrolleri normal çalışmaya devam edecek.
                     self.connection_active = True
                     self.ihaInformer.append("✅ İHA bağlantısı başarılı! (MAVLink)")
                     # ─── PlaneController’a gerçek bağlantıyı ver ───
+                    self.plane_controller = UAVPlane(vehicle=None, connection_string=connection_string)
+                    # Set the MAVLink connection directly in the plane controller
                     self.plane_controller.connection = self.mavlink_client.connection
+                    self.plane_controller.connected = True
+                    self.plane_controller.mavlink_client = self.mavlink_client
                     # Eğer DroneKit vehicle örneğiniz varsa onu da atayabilirsiniz:
                     # self.plane_controller.vehicle = self.mavlink_client.vehicle
 
@@ -1134,15 +1156,23 @@ UAV kontrolleri normal çalışmaya devam edecek.
         
         try:
             # Get telemetry data
-            telemetry = self.get_current_telemetry()
-            
-            if not telemetry:
-                return
+            telemetry = self.mavlink_client.get_telemetry_data()
             
             # Update HUD if available
             if self.hud_widget:
-                self.hud_widget.updateData(telemetry)
-                self.hud_widget.setConnectionState(self.connection_active)
+                # 1) Flight-data & bağlantı durumu
+                self.hud_widget.update_flight_data(telemetry)
+                self.hud_widget.set_connection_status(self.connection_active)
+
+                # 2) Roll / Pitch / Yaw değerlerini de ilet
+                roll  = telemetry.get('roll',  0.0)
+                pitch = telemetry.get('pitch', 0.0)
+                yaw   = telemetry.get('yaw',   0.0)
+                self.hud_widget.update_attitude(roll, pitch, yaw)
+                
+                # 3) Force repaint to ensure HUD is visible
+                self.hud_widget.update()
+                self.hud_widget.repaint()
             
             # Update map with UAV data - use the new method
             self.update_map_with_uav_data({
