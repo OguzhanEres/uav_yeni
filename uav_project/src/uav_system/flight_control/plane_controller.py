@@ -16,9 +16,10 @@ from threading import Timer
 import numpy as np
 import psutil
 
-from ...core.logging_config import get_logger
-from ...core.base_classes import BaseModule
-from ...core.exceptions import ConnectionError, UAVException
+from uav_system.core.logging_config import get_logger
+from uav_system.core.base_classes import BaseComponent
+from uav_system.core.exceptions   import ConnectionError, UAVException
+
 
 logger = get_logger(__name__)
 
@@ -53,20 +54,14 @@ class WaypointNavigator:
             target = self.waypoints[self.current_index]
         self.prev_dist = dist
         return target
-class UAVPlane(BaseModule):
+class UAVPlane(BaseComponent):
     """
     Modern UAV Plane controller with improved error handling and architecture.
     """
     
-    def __init__(self, connection_string: Optional[str] = None, vehicle=None):
-        """
-        Initialize the UAV plane controller.
-        
-        Args:
-            connection_string: MAVLink connection string (e.g., tcp:127.0.0.1:5760)
-            vehicle: Existing dronekit vehicle object
-        """
-        super().__init__()
+    def __init__(self, vehicle=None, connection_string=None):
+        # BaseComponent expects (name: str, config: dict)
+        super().__init__(name="UAVPlane", config=None)
         
         # Connection parameters
         self.connection_string = connection_string
@@ -111,7 +106,21 @@ class UAVPlane(BaseModule):
             self.connect(connection_string)
         else:
             logger.warning("No vehicle or connection string provided")
-    
+    def initialize(self):
+        """Başlangıç konfigürasyonları için çağrılır."""
+        pass
+
+    def start(self):
+        """Çalışmaya başladığında çağrılır."""
+        pass
+
+    def stop(self):
+        """Durdurulurken çağrılır."""
+        pass
+
+    def cleanup(self):
+        """Kaynaklar kapatılırken çağrılır."""
+        pass
     def connect(self, connection_string: str, timeout: int = 30) -> bool:
         """
         Connect to the UAV.
@@ -146,6 +155,21 @@ class UAVPlane(BaseModule):
             error_msg = f"Failed to connect to vehicle: {e}"
             logger.error(error_msg)
             raise ConnectionError(error_msg)
+    
+    def get_location(self):
+        """
+        GLOBAL_POSITION_INT mesajını okuyup lat/lon döner.
+        """
+        if not getattr(self, 'connection', None):
+            raise ConnectionError("Vehicle not connected")
+        msg = self.connection.recv_match(
+            type='GLOBAL_POSITION_INT', blocking=True, timeout=5
+        )
+        if not msg:
+            raise ConnectionError("No position data")
+        return msg.lat / 1e7, msg.lon / 1e7
+
+
     
     def disconnect(self):
         """Disconnect from the UAV."""

@@ -31,9 +31,9 @@ from PyQt5.QtGui import QDesktopServices
 from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEngineSettings, QWebEngineProfile
 
 # Internal imports
-from ...core.logging_config import get_logger
-from ...core.exceptions import ConnectionError, UAVException
-from ...communication.mavlink.mavlink_client import MAVLinkClient
+from uav_system.core.logging_config import get_logger
+from uav_system.core.exceptions import ConnectionError, UAVException
+from uav_system.communication.mavlink.mavlink_client import MAVLinkClient
 # Import settings from config module at the project root
 import sys
 from pathlib import Path
@@ -790,51 +790,55 @@ UAV kontrolleri normal çalışmaya devam edecek.
         if not hasattr(self, 'ihaInformer'):
             logger.error("UI informer widget not found")
             return
-        
+
         try:
             self.ihaInformer.append("🔄 İHA'ya bağlanılıyor...")
-            
+
             # Get connection string from UI
             connection_string = self.get_connection_string()
-            
+
             # Try DroneKit first for COM ports
             if "COM" in connection_string.upper():
                 success = self.connect_dronekit(connection_string)
             else:
                 success = False
-            
+
             # Fallback to MAVLink
             if not success and self.mavlink_client:
                 success = self.mavlink_client.connect(connection_string)
                 if success:
                     self.connection_active = True
                     self.ihaInformer.append("✅ İHA bağlantısı başarılı! (MAVLink)")
-            
+                    # ─── PlaneController’a gerçek bağlantıyı ver ───
+                    self.plane_controller.connection = self.mavlink_client.connection
+                    # Eğer DroneKit vehicle örneğiniz varsa onu da atayabilirsiniz:
+                    # self.plane_controller.vehicle = self.mavlink_client.vehicle
+
             if success:
                 # Enable flight controls
                 self.enable_flight_controls()
-                
+
                 # Update connection status
                 if hasattr(self, 'baglanti'):
                     self.baglanti.setText("Bağlantı: 🟢 Aktif")
-                    
+
                 # Start telemetry updates
                 self.setup_telemetry_timer()
-                
+
                 # Get initial telemetry and update map
                 initial_telemetry = self.get_current_telemetry()
                 if initial_telemetry:
                     self.update_map_with_uav_data(initial_telemetry)
-                    
-                self.ihaInformer.append(f"📡 Telemetri verisi alınıyor...")
+
+                self.ihaInformer.append("📡 Telemetri verisi alınıyor...")
                 logger.info("Drone connection successful, telemetry started")
             else:
                 self.ihaInformer.append("❌ Bağlantı başarısız! Ayarları kontrol edin.")
-                
+
         except Exception as e:
             logger.error(f"Connection failed: {e}")
-            self.ihaInformer.append(f"🚫 Bağlantı hatası: {str(e)}")
-    
+            self.ihaInformer.append(f"🚫 Bağlantı hatası: {e}")
+
     def setup_telemetry_timer(self):
         """Setup telemetry update timer."""
         if not hasattr(self, 'telemetry_timer'):
@@ -1137,9 +1141,8 @@ UAV kontrolleri normal çalışmaya devam edecek.
             
             # Update HUD if available
             if self.hud_widget:
-            # Yeni wrapper metotları
-                self.hud_widget.update_flight_data(telemetry)
-                self.hud_widget.set_connection_status(self.connection_active)
+                self.hud_widget.updateData(telemetry)
+                self.hud_widget.setConnectionState(self.connection_active)
             
             # Update map with UAV data - use the new method
             self.update_map_with_uav_data({

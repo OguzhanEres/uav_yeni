@@ -76,12 +76,29 @@ class HUDWidget(QWidget):
         
         # Bağlantı durumu - telemetri verisinin gerçek olup olmadığını belirtir
         self._isConnected = False
-    def updateData(self, data: dict):
+    """def updateData(self, data: dict):
         super().updateData(data)
+    """
+    """def setConnectionState(self, connected: bool):
+        super().setConnectionState(connected)
+    """
+    
+    def updateData(self, data: dict):
+        """
+        HUD’un internal _data sözlüğünü günceller ve
+        paint/update() metodunu çağırır.
+        """
+        self._data.update(data)
+        self.update()
 
     def setConnectionState(self, connected: bool):
-        super().setConnectionState(connected)
-        
+        """
+        Bağlantı durumunu HUD içindeki flag’e yazar
+        ve yeniden çizer.
+        """
+        self._isConnected = connected
+        self.update()
+    
     def update_flight_data(self, data: dict):
         """
         data içindeki alanları field_mapping üzerinden
