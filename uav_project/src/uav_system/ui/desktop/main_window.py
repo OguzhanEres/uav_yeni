@@ -1161,12 +1161,37 @@ UAV kontrolleri normal çalışmaya devam edecek.
     
     def update_telemetry_display(self):
         """Update telemetry display."""
-        if not self.connection_active:
-            return
-        
         try:
             # Get telemetry data
-            telemetry = self.mavlink_client.get_telemetry_data()
+            if self.connection_active and self.mavlink_client:
+                telemetry = self.mavlink_client.get_telemetry_data()
+            else:
+                # Simülasyon telemetri verisi (bağlantı yoksa)
+                import time
+                import math
+                current_time = time.time()
+                telemetry = {
+                    'lat': 39.9334 + math.sin(current_time * 0.1) * 0.001,
+                    'lon': 32.8597 + math.cos(current_time * 0.1) * 0.001,
+                    'altitude': 100 + math.sin(current_time * 0.2) * 20,
+                    'roll': math.sin(current_time * 0.3) * 10,
+                    'pitch': math.sin(current_time * 0.25) * 5,
+                    'yaw': (current_time * 10) % 360,
+                    'airspeed': 15 + math.sin(current_time * 0.1) * 3,
+                    'groundspeed': 14 + math.sin(current_time * 0.15) * 2,
+                    'flightMode': 'AUTO' if self.connection_active else 'SIMÜLASYON',
+                    'armed': self.connection_active,
+                    'batteryLevel': 85,
+                    'batteryVoltage': 12.4,
+                    'batteryCurrent': 2.1,
+                    'gpsStatus': 2 if self.connection_active else 0,
+                    'gpsSatellites': 12 if self.connection_active else 0,
+                    'waypointDist': 150,
+                    'targetBearing': 45
+                }
+            
+            # Update UI labels
+            self.update_ui_labels(telemetry)
             
             # Update HUD if available
             if self.hud_widget:
@@ -1184,15 +1209,16 @@ UAV kontrolleri normal çalışmaya devam edecek.
                 self.hud_widget.update()
                 self.hud_widget.repaint()
             
-            # Update map with UAV data - use the new method
-            self.update_map_with_uav_data({
-                'lat': telemetry.get('lat', self.current_telemetry['lat']),
-                'lon': telemetry.get('lon', self.current_telemetry['lon']),
-                'alt': telemetry.get('altitude', self.current_telemetry['alt']),
-                'yaw': telemetry.get('yaw', self.current_telemetry['heading']),
-                'mode': telemetry.get('flightMode', self.current_telemetry['flight_mode']),
-                'armed': telemetry.get('armed', self.current_telemetry['armed'])
-            })
+            # Update map with UAV data - use the new method  
+            if self.connection_active:
+                self.update_map_with_uav_data({
+                    'lat': telemetry.get('lat', self.current_telemetry['lat']),
+                    'lon': telemetry.get('lon', self.current_telemetry['lon']),
+                    'alt': telemetry.get('altitude', self.current_telemetry['alt']),
+                    'yaw': telemetry.get('yaw', self.current_telemetry['heading']),
+                    'mode': telemetry.get('flightMode', self.current_telemetry['flight_mode']),
+                    'armed': telemetry.get('armed', self.current_telemetry['armed'])
+                })
                 
         except Exception as e:
             logger.error(f"Telemetry update failed: {e}")
@@ -1339,10 +1365,6 @@ UAV kontrolleri normal çalışmaya devam edecek.
             for label_name, text in labels.items():
                 if hasattr(self, label_name):
                     getattr(self, label_name).setText(text)
-            
-            # Update HUD widget if available
-            if hasattr(self, 'hud_widget') and self.hud_widget:
-                self.hud_widget.updateData(telemetry)
                     
         except Exception as e:
             logger.error(f"Failed to update UI labels: {e}")
