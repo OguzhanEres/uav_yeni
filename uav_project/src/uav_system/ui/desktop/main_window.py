@@ -639,59 +639,69 @@ UAV kontrolleri normal çalışmaya devam edecek.
             return
             
         try:
-            # Create HUD widget as a floating overlay on the main window
-            self.hud_widget = HUDWidget(self)
+            # HUD için container widget olarak label_2'yi kullan
+            if not hasattr(self, 'label_2') or not self.label_2:
+                logger.warning("label_2 widget not found in UI - HUD cannot be setup")
+                return
+                
+            # HUD widget'ını container içine yerleştir
+            self.hud_widget = HUDWidget(self.label_2)
             
-            # Set HUD to a fixed size and position (top-right corner)
-            hud_width = 400
-            hud_height = 300
-            hud_x = self.width() - hud_width - 20  # 20px margin from right
-            hud_y = 20  # 20px margin from top
+            # Container'ın layout'unu ayarla
+            from PyQt5.QtWidgets import QVBoxLayout
+            if self.label_2.layout() is None:
+                layout = QVBoxLayout(self.label_2)
+                layout.setContentsMargins(0, 0, 0, 0)
+                layout.setSpacing(0)
+                self.label_2.setLayout(layout)
+                
+            # Mevcut layout'u temizle
+            layout = self.label_2.layout()
+            while layout.count():
+                child = layout.takeAt(0)
+                if child.widget():
+                    child.widget().deleteLater()
+                    
+            # HUD widget'ını layout'a ekle
+            layout.addWidget(self.hud_widget)
             
-            self.hud_widget.setGeometry(hud_x, hud_y, hud_width, hud_height)
-            self.hud_widget.setFixedSize(hud_width, hud_height)
+            # HUD widget boyutlandırma
+            from PyQt5.QtWidgets import QSizePolicy
+            self.hud_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
             
-            # Give HUD a visible background for debugging
-            self.hud_widget.setStyleSheet("""
+            # Container'ı temizle ve stil ayarla
+            self.label_2.setText("")
+            self.label_2.setStyleSheet("""
                 background-color: rgba(0, 50, 100, 180);
                 border: 2px solid lime;
             """)
             
-            # Set minimum and maximum size policies
-            from PyQt5.QtWidgets import QSizePolicy
-            self.hud_widget.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-            self.hud_widget.setMinimumSize(hud_width, hud_height)
-            
-            # Make HUD visible and bring to front
+            # HUD'u görünür yap
             self.hud_widget.setVisible(True)
             self.hud_widget.show()
-            self.hud_widget.raise_()
             
-            # Set initial connection state
+            # İlk bağlantı durumunu ayarla
             self.hud_widget.setConnectionState(False)
             
-            # Force initial update
+            # İlk güncellemeyi zorla
             self.hud_widget.update()
             self.hud_widget.repaint()
             
-            logger.info(f"HUD widget created as overlay - size: {hud_width}x{hud_height} at position ({hud_x}, {hud_y})")
+            logger.info(f"HUD widget created in label_2 container")
             logger.info("HUD view setup completed")
             
         except Exception as e:
             logger.error(f"HUD setup failed: {e}")
+            import traceback
+            traceback.print_exc()
     
     def resizeEvent(self, event):
-        """Handle window resize and reposition HUD widget."""
+        """Handle window resize."""
         super().resizeEvent(event)
         
+        # HUD artık container içinde olduğu için otomatik olarak boyutlanır
         if hasattr(self, 'hud_widget') and self.hud_widget:
-            # Reposition HUD to top-right corner
-            hud_width = 400
-            hud_height = 300
-            hud_x = self.width() - hud_width - 20
-            hud_y = 20
-            
-            self.hud_widget.setGeometry(hud_x, hud_y, hud_width, hud_height)
+            self.hud_widget.update()  # Yeniden çizim için güncelle
     
     def setup_ui_connections(self):
         """Setup UI button connections and signals."""

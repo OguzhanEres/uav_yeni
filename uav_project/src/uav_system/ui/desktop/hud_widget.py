@@ -177,8 +177,8 @@ class HUDWidget(QWidget):
             # Küçük bir açıklama
             font.setPointSize(10)
             p.setFont(font)
-            p.drawText(self.rect(), Qt.AlignCenter | Qt.TextFlag.TextSingleLine, 
-                       "\n\n\nPress 'Connect' button to establish connection")
+            p.drawText(self.rect().adjusted(0, 40, 0, 0), Qt.AlignCenter, 
+                       "Press 'Connect' button to establish connection")
             return
     
         # === HEADER SECTION (Top) ===
@@ -243,11 +243,31 @@ class HUDWidget(QWidget):
                              cx: float, cy: float,
                              roll: float, pitch: float,
                              span: float = 150.0):
-        """Gelişmiş yapay ufuk (attitude indicator) gösterimi - Optimized for better layout"""
+        """Yapay ufuk göstergesi"""
         p.save()
         
-        # Ana pencere çerçevesi - Adjusted size for better spacing
-        rect_size = span * 2
+        # Ana çerçeve
+        rect_size = span * 0.8
+        horizon_rect = QRectF(cx - rect_size/2, cy - rect_size/2, rect_size, rect_size)
+        
+        # Arka plan
+        p.fillRect(horizon_rect, self._skyColor)
+        
+        # Ufuk çizgisi
+        p.setPen(QPen(self._horizonColor, 2))
+        p.drawLine(int(cx - rect_size/2), int(cy), int(cx + rect_size/2), int(cy))
+        
+        # Merkez nokta
+        p.setPen(QPen(self._primaryColor, 3))
+        center_size = 10
+        p.drawLine(int(cx - center_size), int(cy), int(cx + center_size), int(cy))
+        p.drawLine(int(cx), int(cy - center_size), int(cx), int(cy + center_size))
+        
+        # Çerçeve
+        p.setPen(QPen(self._primaryColor, 2))
+        p.drawRect(horizon_rect)
+        
+        p.restore()
         outer_rect = QRectF(cx - span, cy - span, rect_size, rect_size)
         
         # Yuvarlak bir kırpma alanı oluştur
@@ -385,264 +405,57 @@ class HUDWidget(QWidget):
         p.restore()
 
     def drawCompass(self, p: QPainter, cx: float, cy: float, width: float, heading: float):
-        """Optimized compass display with better spacing"""
+        """Pusula göstergesi"""
         p.save()
         
-        # Pusula şeridinin genişliği - Reduced height for better spacing
-        band_height = 25
-        
-        # Dış çerçeve
-        rect = QRectF(cx - width/2, cy - band_height/2, width, band_height)
-        
-        # Arka plan - Enhanced gradient
-        bg_gradient = QLinearGradient(rect.topLeft(), rect.bottomLeft())
-        bg_gradient.setColorAt(0, QColor(40, 40, 70))
-        bg_gradient.setColorAt(1, QColor(20, 20, 45))
-        p.fillRect(rect, bg_gradient)
-        
-        # Çerçeve - Enhanced visibility
+        # Pusula çerçevesi
+        compass_rect = QRectF(cx - width/2, cy - 30, width, 60)
         p.setPen(QPen(self._primaryColor, 2))
-        p.drawRect(rect)
+        p.drawRect(compass_rect)
         
-        # Görünür pusula aralığı (derece) - Reduced for better detail
-        visible_range = 90
-        degree_width = width / visible_range
-        
-        # Heading değeri 0-360 aralığında normalleştir
-        heading_norm = heading % 360
-        start_angle = (heading_norm + visible_range / 2) % 360
-        
-        # Açı işaretlerini ve etiketleri çiz
-        p.setFont(QFont("Arial", 9, QFont.Bold))
-        p.setPen(self._primaryColor)
-        
-        for i in range(visible_range + 20):
-            angle = (start_angle - i) % 360
-            x = cx - width/2 + i * degree_width
-            
-            if x < cx - width/2 or x > cx + width/2:
-                continue
-                
-            if angle % 30 == 0:
-                # Main directions - Enhanced visibility
-                p.setPen(QPen(self._primaryColor, 3))
-                p.drawLine(QLineF(x, cy - band_height/2, x, cy - band_height/2 + band_height*0.6))
-                
-                # Direction labels - Cleaner display
-                direction = ""
-                if angle == 0:
-                    direction = "N"
-                elif angle == 90:
-                    direction = "E"
-                elif angle == 180:
-                    direction = "S"
-                elif angle == 270:
-                    direction = "W"
-                    
-                if direction:
-                    p.setFont(QFont("Arial", 10, QFont.Bold))
-                    p.drawText(QRectF(x - 12, cy - band_height/2 + band_height*0.65, 24, band_height*0.35), 
-                              Qt.AlignCenter, direction)
-                    p.setFont(QFont("Arial", 9, QFont.Bold))
-            elif angle % 15 == 0:
-                # 15 degree markers
-                p.setPen(QPen(self._primaryColor, 2))
-                p.drawLine(QLineF(x, cy - band_height/2, x, cy - band_height/2 + band_height*0.4))
-        
-        # Center indicator - Enhanced triangle
-        p.setBrush(QBrush(self._warningColor))
-        p.setPen(QPen(self._warningColor, 2))
-        
-        triangle = QPolygon([
-            QPoint(int(cx), int(cy - band_height/2 - 12)),
-            QPoint(int(cx - 8), int(cy - band_height/2)),
-            QPoint(int(cx + 8), int(cy - band_height/2))
-        ])
-        p.drawPolygon(triangle)
-        
-        # Heading value - Positioned below for clarity
+        # Yön yazısı
+        p.setFont(QFont("Arial", 12, QFont.Bold))
         p.setPen(self._textColor)
-        p.setFont(QFont("Arial", 11, QFont.Bold))
-        p.drawText(QRectF(cx - 40, cy + band_height/2 + 5, 80, 18), 
-                  Qt.AlignCenter, f"{int(heading_norm)}°")
+        heading_text = f"HDG: {heading:.0f}°"
+        p.drawText(compass_rect, Qt.AlignCenter, heading_text)
         
         p.restore()
 
     def drawAirspeedIndicator(self, p: QPainter, x: float, cy: float, height: float, airspeed: float):
-        """Enhanced airspeed indicator with better spacing"""
+        """Hava hızı göstergesi"""
         p.save()
         
-        # Optimized width for side panel
-        width = 60
-        
-        # Ana çerçeve
-        rect = QRectF(x - width/2, cy - height/2, width, height)
-        
-        # Enhanced background
-        bg_gradient = QLinearGradient(rect.topLeft(), rect.bottomLeft())
-        bg_gradient.setColorAt(0, QColor(25, 25, 45))
-        bg_gradient.setColorAt(1, QColor(45, 45, 65))
-        p.fillRect(rect, bg_gradient)
-        
-        # Enhanced border
+        # Gösterge alanı
+        indicator_rect = QRectF(x - 40, cy - height/2, 80, height)
         p.setPen(QPen(self._primaryColor, 2))
-        p.drawRect(rect)
+        p.drawRect(indicator_rect)
         
-        # Title label - positioned outside for clarity
-        p.setPen(self._textColor)
-        p.setFont(QFont("Arial", 9, QFont.Bold))
-        title_rect = QRectF(x - width/2, cy - height/2 - 25, width, 20)
-        p.drawText(title_rect, Qt.AlignCenter, "AIRSPEED")
-        
-        # Speed scale - optimized range
-        p.setFont(QFont("Arial", 8))
-        
-        # Visible range centered on current speed
-        visible_range = 40  # m/s
-        min_speed = max(0, airspeed - visible_range/2)
-        max_speed = min_speed + visible_range
-        scale_factor = height / visible_range
-        
-        # Scale lines and values
-        for speed in range(int(min_speed), int(max_speed) + 1, 5):
-            if speed < 0:
-                continue
-                
-            # Y position
-            y = cy + height/2 - (speed - min_speed) * scale_factor
-            
-            if y < cy - height/2 or y > cy + height/2:
-                continue
-            
-            # Major markers every 10 units
-            if speed % 10 == 0:
-                p.setPen(QPen(self._primaryColor, 2))
-                p.drawLine(QLineF(x - width/2 + 5, y, x - width/2 + width*0.4, y))
-                p.setPen(self._textColor)
-                p.drawText(QRectF(x - width/2 + width*0.45, y - 8, width*0.5, 16), 
-                          Qt.AlignLeft | Qt.AlignVCenter, f"{speed}")
-            else:
-                # Minor markers
-                p.setPen(QPen(self._primaryColor, 1))
-                p.drawLine(QLineF(x - width/2 + 5, y, x - width/2 + width*0.25, y))
-        
-        # Current speed indicator
-        indicator_y = cy + height/2 - (airspeed - min_speed) * scale_factor
-        
-        if indicator_y >= cy - height/2 and indicator_y <= cy + height/2:
-            p.setBrush(QBrush(self._warningColor))
-            p.setPen(QPen(self._warningColor, 2))
-            
-            triangle = QPolygon([
-                QPoint(int(x - width/2 - 8), int(indicator_y)),
-                QPoint(int(x - width/2 + 2), int(indicator_y - 6)),
-                QPoint(int(x - width/2 + 2), int(indicator_y + 6))
-            ])
-            p.drawPolygon(triangle)
-        
-        # Current speed display box - positioned below
-        box_rect = QRectF(x - width/2, cy + height/2 + 8, width, 22)
-        p.setBrush(QBrush(QColor(0, 0, 0, 200)))
-        p.setPen(QPen(self._primaryColor, 1))
-        p.drawRoundedRect(box_rect, 3, 3)
-        
-        p.setPen(self._textColor)
+        # Hız değeri
         p.setFont(QFont("Arial", 10, QFont.Bold))
-        p.drawText(box_rect, Qt.AlignCenter, f"{airspeed:.1f}")
+        p.setPen(self._textColor)
+        p.drawText(indicator_rect.adjusted(5, 5, -5, -height/2), Qt.AlignTop, "AIRSPEED")
         
-        # Units label
-        p.setFont(QFont("Arial", 8))
-        units_rect = QRectF(x - width/2, cy + height/2 + 32, width, 15)
-        p.drawText(units_rect, Qt.AlignCenter, "m/s")
+        speed_text = f"{airspeed:.1f} m/s"
+        p.drawText(indicator_rect, Qt.AlignCenter, speed_text)
         
         p.restore()
 
     def drawAltitudeIndicator(self, p: QPainter, x: float, cy: float, height: float, altitude: float):
-        """Enhanced altitude indicator with better spacing"""
+        """İrtifa göstergesi"""
         p.save()
         
-        # Optimized width for side panel
-        width = 60
-        
-        # Ana çerçeve
-        rect = QRectF(x - width/2, cy - height/2, width, height)
-        
-        # Enhanced background
-        bg_gradient = QLinearGradient(rect.topLeft(), rect.bottomLeft())
-        bg_gradient.setColorAt(0, QColor(25, 25, 45))
-        bg_gradient.setColorAt(1, QColor(45, 45, 65))
-        p.fillRect(rect, bg_gradient)
-        
-        # Enhanced border
+        # Gösterge alanı
+        indicator_rect = QRectF(x - 40, cy - height/2, 80, height)
         p.setPen(QPen(self._primaryColor, 2))
-        p.drawRect(rect)
+        p.drawRect(indicator_rect)
         
-        # Title label - positioned outside for clarity
-        p.setPen(self._textColor)
-        p.setFont(QFont("Arial", 9, QFont.Bold))
-        title_rect = QRectF(x - width/2, cy - height/2 - 25, width, 20)
-        p.drawText(title_rect, Qt.AlignCenter, "ALTITUDE")
-        
-        # Altitude scale - optimized range
-        p.setFont(QFont("Arial", 8))
-        
-        # Visible range centered on current altitude
-        visible_range = 80  # meters
-        min_alt = max(0, altitude - visible_range/2)
-        max_alt = min_alt + visible_range
-        scale_factor = height / visible_range
-        
-        # Scale lines and values
-        for alt in range(int(min_alt), int(max_alt) + 1, 10):
-            if alt < 0:
-                continue
-                
-            # Y position
-            y = cy + height/2 - (alt - min_alt) * scale_factor
-            
-            if y < cy - height/2 or y > cy + height/2:
-                continue
-            
-            # Major markers every 20 meters
-            if alt % 20 == 0:
-                p.setPen(QPen(self._primaryColor, 2))
-                p.drawLine(QLineF(x + width/2 - 5, y, x + width/2 - width*0.4, y))
-                p.setPen(self._textColor)
-                p.drawText(QRectF(x + width/2 - width*0.95, y - 8, width*0.5, 16), 
-                          Qt.AlignRight | Qt.AlignVCenter, f"{alt}")
-            else:
-                # Minor markers
-                p.setPen(QPen(self._primaryColor, 1))
-                p.drawLine(QLineF(x + width/2 - 5, y, x + width/2 - width*0.25, y))
-        
-        # Current altitude indicator
-        indicator_y = cy + height/2 - (altitude - min_alt) * scale_factor
-        
-        if indicator_y >= cy - height/2 and indicator_y <= cy + height/2:
-            p.setBrush(QBrush(self._warningColor))
-            p.setPen(QPen(self._warningColor, 2))
-            
-            triangle = QPolygon([
-                QPoint(int(x + width/2 + 8), int(indicator_y)),
-                QPoint(int(x + width/2 - 2), int(indicator_y - 6)),
-                QPoint(int(x + width/2 - 2), int(indicator_y + 6))
-            ])
-            p.drawPolygon(triangle)
-        
-        # Current altitude display box - positioned below
-        box_rect = QRectF(x - width/2, cy + height/2 + 8, width, 22)
-        p.setBrush(QBrush(QColor(0, 0, 0, 200)))
-        p.setPen(QPen(self._primaryColor, 1))
-        p.drawRoundedRect(box_rect, 3, 3)
-        
-        p.setPen(self._textColor)
+        # İrtifa değeri
         p.setFont(QFont("Arial", 10, QFont.Bold))
-        p.drawText(box_rect, Qt.AlignCenter, f"{altitude:.1f}")
+        p.setPen(self._textColor)
+        p.drawText(indicator_rect.adjusted(5, 5, -5, -height/2), Qt.AlignTop, "ALTITUDE")
         
-        # Units label
-        p.setFont(QFont("Arial", 8))
-        units_rect = QRectF(x - width/2, cy + height/2 + 32, width, 15)
-        p.drawText(units_rect, Qt.AlignCenter, "m")
+        alt_text = f"{altitude:.1f} m"
+        p.drawText(indicator_rect, Qt.AlignCenter, alt_text)
         
         p.restore()
 
@@ -651,64 +464,29 @@ class HUDWidget(QWidget):
         """Batarya durumu göstergesi"""
         p.save()
         
-        # Arka plan
-        rect = QRectF(x, y, width, height)
-        p.setBrush(QBrush(QColor(0, 0, 0, 180)))
-        p.setPen(QPen(self._primaryColor))
-        p.drawRect(rect)
+        # Batarya çerçevesi
+        battery_rect = QRectF(x, y, width, height)
+        p.setPen(QPen(self._primaryColor, 2))
+        p.drawRect(battery_rect)
         
-        # Batarya ikonu
-        icon_width = 30
-        icon_margin = 5
-        icon_rect = QRectF(x + icon_margin, y + icon_margin, 
-                          icon_width, height - 2*icon_margin)
-        
-        # Batarya gövdesi
-        p.setBrush(QBrush(QColor(30, 30, 30)))
-        p.setPen(QPen(self._primaryColor))
-        p.drawRect(icon_rect)
-        
-        # Batarya üst kısmı
-        cap_width = icon_width / 4
-        cap_height = height / 3
-        cap_rect = QRectF(x + icon_margin + (icon_width - cap_width)/2, 
-                         y + icon_margin - cap_height/4, 
-                         cap_width, cap_height/2)
-        p.drawRect(cap_rect)
-        
-        # Batarya doluluğu
-        fill_width = icon_width - 4
-        fill_height = height - 2*icon_margin - 4
-        level_pct = max(0.0, min(1.0, level / 100.0))
-        fill_rect = QRectF(x + icon_margin + 2, 
-                          y + icon_margin + 2 + (1.0 - level_pct) * fill_height, 
-                          fill_width, level_pct * fill_height)
-        
-        # Batarya seviyesine göre renk değişimi
+        # Batarya seviyesi rengi
         if level > 50:
-            p.setBrush(QBrush(QColor(0, 255, 0)))
-        elif level > 25:
-            p.setBrush(QBrush(QColor(255, 165, 0)))
+            fill_color = self._primaryColor
+        elif level > 20:
+            fill_color = self._warningColor
         else:
-            p.setBrush(QBrush(QColor(255, 0, 0)))
-            
-        p.setPen(Qt.NoPen)
-        p.drawRect(fill_rect)
+            fill_color = self._dangerColor
         
-        # Batarya yüzdesi ve voltaj bilgisi
-        text_x = x + icon_margin + icon_width + 10
-        text_width = width - icon_width - icon_margin - 10
+        # Batarya dolgu seviyesi
+        fill_width = (width - 4) * (level / 100.0)
+        fill_rect = QRectF(x + 2, y + 2, fill_width, height - 4)
+        p.fillRect(fill_rect, fill_color)
         
+        # Batarya metni
+        p.setFont(QFont("Arial", 9))
         p.setPen(self._textColor)
-        p.setFont(QFont("Arial", 8, QFont.Bold))
-        
-        # Yüzde
-        percent_rect = QRectF(text_x, y + 2, text_width, height/2 - 2)
-        p.drawText(percent_rect, Qt.AlignLeft | Qt.AlignVCenter, f"{int(level)}%")
-        
-        # Voltaj
-        voltage_rect = QRectF(text_x, y + height/2, text_width, height/2 - 2)
-        p.drawText(voltage_rect, Qt.AlignLeft | Qt.AlignVCenter, f"{voltage:.1f}V")
+        battery_text = f"BAT: {level:.0f}%\n{voltage:.1f}V"
+        p.drawText(battery_rect, Qt.AlignCenter, battery_text)
         
         p.restore()
 
@@ -717,408 +495,168 @@ class HUDWidget(QWidget):
         """GPS durumu göstergesi"""
         p.save()
         
-        # Arka plan
-        rect = QRectF(x, y, width, height)
-        p.setBrush(QBrush(QColor(0, 0, 0, 180)))
-        p.setPen(QPen(self._primaryColor))
-        p.drawRect(rect)
-        
-        # GPS ikonu
-        icon_size = min(width, height) - 10
-        icon_x = x + 5
-        icon_y = y + (height - icon_size) / 2
-        
-        # GPS sinyal gücü göstergesi
+        # GPS çerçevesi
+        gps_rect = QRectF(x, y, width, height)
         p.setPen(QPen(self._primaryColor, 2))
+        p.drawRect(gps_rect)
         
-        # GPS durumuna göre renk
-        if status == 0:  # No Fix
-            signal_color = self._dangerColor
-            status_text = "NO FIX"
-        elif status == 1:  # GPS Fix
-            signal_color = self._warningColor
-            status_text = "GPS"
-        else:  # DGPS veya daha iyi
-            signal_color = self._primaryColor
-            status_text = "DGPS"
-            
-        p.setPen(QPen(signal_color, 2))
+        # GPS durumu rengi
+        if status >= 2:
+            status_color = self._primaryColor
+            status_text = "GPS: FIX"
+        elif status == 1:
+            status_color = self._warningColor
+            status_text = "GPS: WEAK"
+        else:
+            status_color = self._dangerColor
+            status_text = "GPS: NO FIX"
         
-        # Sinyal çubukları (4 çubuk)
-        bar_width = icon_size / 6
-        bar_spacing = icon_size / 12
-        bar_max_height = icon_size * 0.8
-        
-        # GPS çeşitliliği ve uydu sayısını görselleştir
-        for i in range(4):
-            bar_height = bar_max_height * (i+1) / 4
-            
-            # Eğer uydu sayısı yeterli değilse, çubukları soluk göster
-            if satellites >= (i+1) * 2:
-                p.setBrush(signal_color)
-            else:
-                p.setBrush(QColor(80, 80, 80))
-                
-            bar_x = icon_x + i * (bar_width + bar_spacing)
-            bar_y = icon_y + icon_size - bar_height
-            bar_rect = QRectF(bar_x, bar_y, bar_width, bar_height)
-            p.drawRect(bar_rect)
-        
-        # GPS bilgisi
-        text_x = x + icon_size + 10
-        text_width = width - icon_size - 15
-        
-        p.setPen(self._textColor)
-        p.setFont(QFont("Arial", 8, QFont.Bold))
-        
-        # GPS durumu
-        status_rect = QRectF(text_x, y + 2, text_width, height/2 - 2)
-        p.drawText(status_rect, Qt.AlignLeft | Qt.AlignVCenter, status_text)
-        
-        # Uydu sayısı
-        sat_rect = QRectF(text_x, y + height/2, text_width, height/2 - 2)
-        p.drawText(sat_rect, Qt.AlignLeft | Qt.AlignVCenter, f"SAT: {satellites}")
+        # GPS metni
+        p.setFont(QFont("Arial", 9))
+        p.setPen(status_color)
+        gps_info = f"{status_text}\nSAT: {satellites}"
+        p.drawText(gps_rect, Qt.AlignCenter, gps_info)
         
         p.restore()
 
     def drawFlightMode(self, p: QPainter, cx: float, y: float, mode: str, armed: bool):
-        """Enhanced flight mode display for header area"""
+        """Uçuş modu göstergesi"""
         p.save()
         
-        # Enhanced dimensions for better visibility
-        width = 140
-        height = 35
-        rect = QRectF(cx - width/2, y - height/2, width, height)
+        # Uçuş modu metni
+        p.setFont(QFont("Arial", 12, QFont.Bold))
         
-        # Enhanced background with better visual feedback
+        # Armed durumuna göre renk
         if armed:
-            bg_color = QColor(0, 120, 0, 200)  # Bright green for armed
-            border_color = self._primaryColor
+            p.setPen(self._dangerColor)
+            mode_text = f"{mode} - ARMED"
         else:
-            bg_color = QColor(120, 60, 0, 200)  # Orange for disarmed
-            border_color = self._warningColor
+            p.setPen(self._primaryColor)
+            mode_text = f"{mode} - DISARMED"
         
-        p.setBrush(QBrush(bg_color))
-        p.setPen(QPen(border_color, 2))
-        p.drawRoundedRect(rect, 5, 5)
+        # Metin çerçevesi
+        fm = QFontMetrics(p.font())
+        text_width = fm.width(mode_text)
+        text_height = fm.height()
         
-        # Mode text - larger and more prominent
-        p.setPen(self._textColor)
-        p.setFont(QFont("Arial", 13, QFont.Bold))
-        mode_rect = QRectF(cx - width/2, y - height/2 + 2, width, height/2 + 5)
-        p.drawText(mode_rect, Qt.AlignCenter, mode)
+        text_rect = QRectF(cx - text_width/2 - 10, y - text_height/2 - 5, 
+                          text_width + 20, text_height + 10)
         
-        # Armed/Disarmed status - smaller but visible
-        p.setFont(QFont("Arial", 9, QFont.Bold))
-        status_rect = QRectF(cx - width/2, y + 2, width, height/2 - 2)
-        status_text = "● ARMED" if armed else "○ DISARMED"
-        p.drawText(status_rect, Qt.AlignCenter, status_text)
+        p.setPen(QPen(self._primaryColor, 2))
+        p.drawRect(text_rect)
+        
+        # Metni çiz
+        if armed:
+            p.setPen(self._dangerColor)
+        else:
+            p.setPen(self._primaryColor)
+        
+        p.drawText(text_rect, Qt.AlignCenter, mode_text)
         
         p.restore()
 
     def drawThrottleIndicator(self, p: QPainter, x: float, y: float, width: float, height: float, throttle: float):
-        """Enhanced throttle indicator for footer area"""
+        """Gaz kelebeği göstergesi"""
         p.save()
         
-        # Enhanced frame
-        rect = QRectF(x, y, width, height)
-        bg_gradient = QLinearGradient(rect.topLeft(), rect.bottomLeft())
-        bg_gradient.setColorAt(0, QColor(25, 25, 45))
-        bg_gradient.setColorAt(1, QColor(45, 45, 65))
-        p.fillRect(rect, bg_gradient)
+        # Throttle çerçevesi
+        throttle_rect = QRectF(x, y, width, height)
         p.setPen(QPen(self._primaryColor, 2))
-        p.drawRoundedRect(rect, 3, 3)
+        p.drawRect(throttle_rect)
         
-        # Title - positioned above
+        # Throttle seviyesi
+        fill_width = (width - 4) * (throttle / 100.0)
+        fill_rect = QRectF(x + 2, y + 2, fill_width, height - 4)
+        p.fillRect(fill_rect, self._primaryColor)
+        
+        # Throttle metni
+        p.setFont(QFont("Arial", 9))
         p.setPen(self._textColor)
-        p.setFont(QFont("Arial", 9, QFont.Bold))
-        p.drawText(QRectF(x, y - 20, width, 18), 
-                  Qt.AlignCenter, "THROTTLE")
+        throttle_text = f"THR: {throttle:.0f}%"
+        p.drawText(throttle_rect, Qt.AlignCenter, throttle_text)
         
-        # Inner area for the bar
-        inner_margin = 3
-        inner_rect = QRectF(x + inner_margin, y + inner_margin, 
-                           width - 2*inner_margin, height - 2*inner_margin)
-        
-        # Scale markers
-        p.setPen(QPen(self._primaryColor, 1))
-        for i in range(6):  # 0%, 20%, 40%, 60%, 80%, 100%
-            tick_x = x + inner_margin + (width - 2*inner_margin) * i / 5
-            p.drawLine(QLineF(tick_x, y + inner_margin, tick_x, y + inner_margin + 4))
-            
-            # Labels for 0%, 50%, 100%
-            if i in [0, 2, 5]:
-                p.setFont(QFont("Arial", 8))
-                p.drawText(QRectF(tick_x - 15, y + height - 15, 30, 12), 
-                          Qt.AlignCenter, f"{i*20}%")
-        
-        # Throttle fill bar
-        throttle_pct = max(0.0, min(1.0, throttle / 100.0))
-        fill_width = (width - 2*inner_margin) * throttle_pct
-        
-        # Color based on throttle level
-        if throttle_pct <= 0.3:
-            fill_color = QColor(0, 255, 0)  # Green
-        elif throttle_pct <= 0.7:
-            fill_color = QColor(255, 165, 0)  # Orange
-        else:
-            fill_color = QColor(255, 0, 0)  # Red
-            
-        fill_rect = QRectF(x + inner_margin, y + inner_margin + 4, 
-                          fill_width, height - 2*inner_margin - 4 - 12)
-        
-        p.setBrush(QBrush(fill_color))
-        p.setPen(Qt.NoPen)
-        p.drawRect(fill_rect)
-        
-        # Throttle percentage - centered
-        p.setPen(self._textColor)
-        p.setFont(QFont("Arial", 10, QFont.Bold))
-        text_rect = QRectF(x, y + inner_margin + 4, width, height - 2*inner_margin - 4 - 12)
-        p.drawText(text_rect, Qt.AlignCenter, f"{int(throttle)}%")
-                
         p.restore()
 
     def drawGroundspeedIndicator(self, p: QPainter, cx: float, y: float, groundspeed: float):
-        """Enhanced ground speed indicator for footer center"""
+        """Yer hızı göstergesi"""
         p.save()
         
-        width = 120
-        height = 30
-        
-        # Enhanced frame
-        rect = QRectF(cx - width/2, y - height/2, width, height)
-        bg_gradient = QLinearGradient(rect.topLeft(), rect.bottomLeft())
-        bg_gradient.setColorAt(0, QColor(25, 25, 45))
-        bg_gradient.setColorAt(1, QColor(45, 45, 65))
-        p.fillRect(rect, bg_gradient)
-        p.setPen(QPen(self._primaryColor, 2))
-        p.drawRoundedRect(rect, 3, 3)
-        
-        # Title - positioned above
+        # Yer hızı metni
+        p.setFont(QFont("Arial", 10, QFont.Bold))
         p.setPen(self._textColor)
-        p.setFont(QFont("Arial", 9, QFont.Bold))
-        title_rect = QRectF(cx - width/2, y - height/2 - 22, width, 18)
-        p.drawText(title_rect, Qt.AlignCenter, "GROUND SPEED")
         
-        # Speed value - larger and centered
-        p.setFont(QFont("Arial", 12, QFont.Bold))
-        p.drawText(rect, Qt.AlignCenter, f"{groundspeed:.1f} m/s")
+        speed_text = f"GND SPD: {groundspeed:.1f} m/s"
+        fm = QFontMetrics(p.font())
+        text_width = fm.width(speed_text)
+        
+        text_rect = QRectF(cx - text_width/2 - 5, y - 10, text_width + 10, 20)
+        p.setPen(QPen(self._primaryColor, 1))
+        p.drawRect(text_rect)
+        
+        p.setPen(self._textColor)
+        p.drawText(text_rect, Qt.AlignCenter, speed_text)
         
         p.restore()
 
     def drawWaypointInfo(self, p: QPainter, x: float, y: float, width: float, height: float, 
                         distance: float, bearing: float):
-        """Enhanced waypoint information display for footer area"""
+        """Waypoint bilgi göstergesi"""
         p.save()
         
-        # Enhanced frame
-        rect = QRectF(x, y, width, height)
-        bg_gradient = QLinearGradient(rect.topLeft(), rect.bottomLeft())
-        bg_gradient.setColorAt(0, QColor(25, 25, 45))
-        bg_gradient.setColorAt(1, QColor(45, 45, 65))
-        p.fillRect(rect, bg_gradient)
+        # Waypoint çerçevesi
+        wp_rect = QRectF(x, y, width, height)
         p.setPen(QPen(self._primaryColor, 2))
-        p.drawRoundedRect(rect, 3, 3)
+        p.drawRect(wp_rect)
         
-        # Title - positioned above
+        # Waypoint metni
+        p.setFont(QFont("Arial", 9))
         p.setPen(self._textColor)
-        p.setFont(QFont("Arial", 9, QFont.Bold))
-        p.drawText(QRectF(x, y - 22, width, 18), 
-                  Qt.AlignCenter, "WAYPOINT")
+        wp_text = f"WP DIST\n{distance:.0f}m\n{bearing:.0f}°"
+        p.drawText(wp_rect, Qt.AlignCenter, wp_text)
         
-        # Compass indicator - smaller and positioned right
-        compass_size = height - 8
-        compass_x = x + width - compass_size - 4
-        compass_y = y + 4
-        
-        # Compass circle
-        p.setPen(QPen(self._primaryColor, 2))
-        compass_center = QPointF(compass_x + compass_size/2, compass_y + compass_size/2)
-        p.drawEllipse(compass_center, compass_size/2, compass_size/2)
-        
-        # Direction arrow
-        p.save()
-        p.translate(compass_center)
-        p.rotate(bearing)
-        
-        # Enhanced arrow design
-        arrow_size = compass_size * 0.35
-        path = QPainterPath()
-        path.moveTo(0, -arrow_size)
-        path.lineTo(arrow_size * 0.3, arrow_size * 0.2)
-        path.lineTo(0, 0)
-        path.lineTo(-arrow_size * 0.3, arrow_size * 0.2)
-        path.closeSubpath()
-        
-        p.setBrush(QBrush(self._warningColor))
-        p.setPen(QPen(self._warningColor, 2))
-        p.drawPath(path)
-        
-        p.restore()
-        
-        # Information text area
-        text_width = compass_x - x - 8
-        
-        # Distance display
-        p.setPen(self._textColor)
-        p.setFont(QFont("Arial", 9, QFont.Bold))
-        
-        # Format distance
-        if distance < 1000:
-            distance_text = f"{int(distance)} m"
-        else:
-            distance_text = f"{distance/1000:.1f} km"
-            
-        dist_rect = QRectF(x + 4, y + 4, text_width, height/2 - 2)
-        p.drawText(dist_rect, Qt.AlignLeft | Qt.AlignVCenter, f"D: {distance_text}")
-                  
-        # Bearing display
-        bearing_rect = QRectF(x + 4, y + height/2 + 2, text_width, height/2 - 6)
-        p.drawText(bearing_rect, Qt.AlignLeft | Qt.AlignVCenter, f"B: {int(bearing)}°")
-                  
         p.restore()
 
     def drawInfoPanel(self, p: QPainter, cx: float, y: float, width: float, height: float):
-        """Ana bilgi paneli - çeşitli telemetri verilerini gösterir"""
+        """Bilgi paneli"""
         p.save()
         
-        # Ana çerçeve
-        rect = QRectF(cx - width/2, y - height/2, width, height)
-        p.setBrush(QBrush(QColor(0, 0, 0, 180)))
-        p.setPen(QPen(self._primaryColor))
-        p.drawRect(rect)
+        # Panel çerçevesi
+        panel_rect = QRectF(cx - width/2, y, width, height)
+        p.setPen(QPen(self._primaryColor, 2))
+        p.drawRect(panel_rect)
         
-        # İçeriği 3 sütuna böl
-        col_width = width / 3
-        
-        # Font ayarları
-        p.setPen(self._textColor)
+        # Sistem bilgileri
         p.setFont(QFont("Arial", 9))
-        
-        # 1. Sütun - Roll/Pitch/Yaw
-        col1_x = cx - width/2
-        
-        p.drawText(QRectF(col1_x + 5, y - height/2 + 5, col_width - 5, 15), 
-                  Qt.AlignLeft, f"Roll: {self._data['roll']:.1f}°")
-                  
-        p.drawText(QRectF(col1_x + 5, y - height/2 + 20, col_width - 5, 15), 
-                  Qt.AlignLeft, f"Pitch: {self._data['pitch']:.1f}°")
-                  
-        p.drawText(QRectF(col1_x + 5, y - height/2 + 35, col_width - 5, 15), 
-                  Qt.AlignLeft, f"Yaw: {self._data['yaw']:.1f}°")
-        
-        # 2. Sütun - GPS Konum
-        col2_x = cx - width/2 + col_width
-        
-        # Koordinat değerlerini burada göstermiyoruz çünkü 
-        # veri modeli şu anda bunları içermiyor. Gerektiğinde eklenebilir.
-        p.drawText(QRectF(col2_x + 5, y - height/2 + 5, col_width - 5, 15), 
-                  Qt.AlignLeft, "GPS Position:")
-                  
-        p.drawText(QRectF(col2_x + 5, y - height/2 + 20, col_width - 5, 15), 
-                  Qt.AlignLeft, f"Lat: -")
-                  
-        p.drawText(QRectF(col2_x + 5, y - height/2 + 35, col_width - 5, 15), 
-                  Qt.AlignLeft, f"Lon: -")
-        
-        # 3. Sütun - İrtifa ve Hız
-        col3_x = cx - width/2 + col_width * 2
-        
-        p.drawText(QRectF(col3_x + 5, y - height/2 + 5, col_width - 10, 15), 
-                  Qt.AlignRight, f"Alt: {self._data['altitude']:.1f} m")
-                  
-        p.drawText(QRectF(col3_x + 5, y - height/2 + 20, col_width - 10, 15), 
-                  Qt.AlignRight, f"AS: {self._data['airspeed']:.1f} m/s")
-                  
-        p.drawText(QRectF(col3_x + 5, y - height/2 + 35, col_width - 10, 15), 
-                  Qt.AlignRight, f"GS: {self._data['groundspeed']:.1f} m/s")
+        p.setPen(self._textColor)
+        info_text = "HUD ACTIVE\nSYSTEM READY"
+        p.drawText(panel_rect, Qt.AlignCenter, info_text)
         
         p.restore()
 
-    # Compatibility methods for integration with the main application
+    # Uyumluluk metodları
     def update_flight_data(self, data: dict):
-        """Update flight data from external sources (compatibility method)"""
-        # Map new field names to internal format
-        mapped_data = {}
-        
-        # Map common field names to internal format
-        field_mapping = {
-            'pitch': 'pitch',
-            'roll': 'roll', 
-            'yaw': 'yaw',
-            'airspeed': 'airspeed',
-            'air_speed': 'airspeed',
-            'groundspeed': 'groundspeed', 
-            'ground_speed': 'groundspeed',
-            'altitude': 'altitude',
-            'throttle': 'throttle',
-            'battery_voltage': 'batteryVoltage',
-            'battery_level': 'batteryLevel',
-            'battery_remaining': 'batteryLevel',
-            'battery_current': 'batteryCurrent',
-            'armed': 'armed',
-            'flight_mode': 'flightMode',
-            'gps_fix_type': 'gpsStatus',
-            'satellites_visible': 'gpsSatellites'
-        }
-        
-        for new_key, old_key in field_mapping.items():
-            if new_key in data:
-                mapped_data[old_key] = data[new_key]
-        
-        # Update internal data and trigger repaint
-        self.updateData(mapped_data)
-        
+        """Uçuş verilerini güncelle"""
+        self.updateData(data)
+
     def set_connection_status(self, connected: bool):
-        """Set connection status (compatibility method)"""
+        """Bağlantı durumunu ayarla"""
         self.setConnectionState(connected)
 
     def showEvent(self, event):
-        """Override showEvent to ensure HUD fills the entire parent area."""
+        """Widget gösterildiğinde"""
         super().showEvent(event)
-        if self.parent():
-            # Resize to match parent exactly
-            parent_size = self.parent().size()
-            self.setGeometry(0, 0, parent_size.width(), parent_size.height())
-            self.resize(parent_size)
-            self.update()
+        print(f"HUD Widget shown - size: {self.size()}")
 
     def resizeEvent(self, event):
-        """Override resizeEvent to handle size changes properly."""
+        """Widget boyutu değiştiğinde"""
         super().resizeEvent(event)
-        # Force update when size changes
-        self.update()
+        print(f"HUD Widget resized to: {self.size()}")
+
     def update_attitude(self, roll: float, pitch: float, yaw: float):
-        """
-        Arayüzdeki Roll/Pitch/Yaw göstergesini güncelle.
-        """
-        # eğer QML veya Canvas kullanıyorsanız:
-        self.roll_value = roll
-        self.pitch_value = pitch
-        self.yaw_value = yaw
-        # Value değişti, yeniden çiz
-        self.update()          # QWidget subclass için
-        # veya QQuickItem için:
-        # self.setProperty('roll', roll); vb.
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        center_x = self.width()  // 2
-        center_y = self.height() // 2
-
-        # 1) Pitch kaydırma + Roll dönüşü
-        painter.save()
-        painter.translate(center_x, center_y + self.pitch_value * 2)  # ölçeği ayarla
-        painter.rotate(-self.roll_value)
-        # gök/yer çizimini burada yap
-        # e.g. painter.fillRect(...), painter.drawLine(...), vs.
-        painter.restore()
-
-        # 2) Heading oku için Yaw dönüşü
-        painter.save()
-        painter.translate(center_x, center_y)
-        painter.rotate(self.yaw_value)
-        # başlık oku çizimi
-        # e.g. painter.drawPolygon(...)
-        painter.restore()
+        """Attitude verilerini güncelle"""
+        data = {
+            'roll': roll,
+            'pitch': pitch,
+            'yaw': yaw
+        }
+        self.updateData(data)
